@@ -16,6 +16,8 @@ def test_create_initial_state_contains_research_fields() -> None:
     assert state["page_records"] == []
     assert state["sources"] == []
     assert state["observations"] == []
+    assert state["plan"] is None
+    assert state["current_step_id"] is None
     assert state["final_report"] is None
 
 

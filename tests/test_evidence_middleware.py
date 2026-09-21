@@ -110,7 +110,8 @@ def test_successful_page_read_becomes_page_evidence() -> None:
                 "content": "Full page evidence",
                 "truncated": False,
             }
-        )
+        ),
+        step_id="step-2",
     )
 
     assert update["page_records"] == [
@@ -121,6 +122,7 @@ def test_successful_page_read_becomes_page_evidence() -> None:
             "content_chars": 18,
             "truncated": False,
             "error": None,
+            "step_id": "step-2",
         }
     ]
     assert update["sources"][0]["url"] == "https://example.com/article"
@@ -130,6 +132,7 @@ def test_successful_page_read_becomes_page_evidence() -> None:
             "source_url": "https://example.com/article",
             "query": "",
             "evidence_type": "page_content",
+            "step_id": "step-2",
         }
     ]
 

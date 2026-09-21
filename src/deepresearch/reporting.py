@@ -55,21 +55,42 @@ def format_trace(state: ResearchState) -> str:
     """Render searches and sources as a readable, non-LLM execution trace."""
 
     stats = calculate_stats(state)
-    lines = [
-        "--- Research Trace（程序统计，非 LLM 生成）---",
-        f"搜索次数：{stats.total_searches}",
-        f"成功并返回结果：{stats.successful_searches}",
-        f"成功但无结果：{stats.empty_searches}",
-        f"执行失败：{stats.failed_searches}",
-        f"原始搜索结果：{stats.returned_results}",
-        f"去重后来源：{stats.unique_sources}",
-        f"Observation 数量：{stats.observation_count}",
-        f"网页读取次数：{stats.total_page_reads}",
-        f"网页读取成功：{stats.successful_page_reads}",
-        f"网页读取失败：{stats.failed_page_reads}",
-        "",
-        "搜索记录：",
-    ]
+    lines = ["--- Research Trace（程序统计，非 LLM 生成）---", "研究计划："]
+    plan = state.get("plan")
+    if not plan:
+        lines.append("（无）")
+    else:
+        status_labels = {
+            "pending": "待处理",
+            "in_progress": "进行中",
+            "completed": "已完成",
+            "failed": "失败",
+        }
+        lines.append(f'目标：{plan["goal"]}')
+        lines.append(f'当前步骤：{state.get("current_step_id") or "无"}')
+        for step in plan["steps"]:
+            lines.append(
+                f'- [{status_labels[step["status"]]}] '
+                f'{step["step_id"]}: {step["title"]}'
+            )
+
+    lines.extend(
+        [
+            "",
+            f"搜索次数：{stats.total_searches}",
+            f"成功并返回结果：{stats.successful_searches}",
+            f"成功但无结果：{stats.empty_searches}",
+            f"执行失败：{stats.failed_searches}",
+            f"原始搜索结果：{stats.returned_results}",
+            f"去重后来源：{stats.unique_sources}",
+            f"Observation 数量：{stats.observation_count}",
+            f"网页读取次数：{stats.total_page_reads}",
+            f"网页读取成功：{stats.successful_page_reads}",
+            f"网页读取失败：{stats.failed_page_reads}",
+            "",
+            "搜索记录：",
+        ]
+    )
 
     records = state.get("search_records", [])
     if not records:
@@ -83,6 +104,8 @@ def format_trace(state: ResearchState) -> str:
             status = "成功"
         lines.append(f'{index}. {record["query"]}')
         lines.append(f'   状态：{status}；结果：{record["result_count"]}')
+        if record.get("step_id"):
+            lines.append(f'   计划步骤：{record["step_id"]}')
         if record["error"]:
             lines.append(f'   错误：{record["error"]}')
 
@@ -97,6 +120,8 @@ def format_trace(state: ResearchState) -> str:
             f'   状态：{status}；正文字符：{record["content_chars"]}；'
             f'截断：{"是" if record["truncated"] else "否"}'
         )
+        if record.get("step_id"):
+            lines.append(f'   计划步骤：{record["step_id"]}')
         if record["final_url"] and record["final_url"] != record["requested_url"]:
             lines.append(f'   最终地址：{record["final_url"]}')
         if record["error"]:

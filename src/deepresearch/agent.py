@@ -19,9 +19,14 @@ from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 
 from deepresearch.config import Settings
-from deepresearch.middlewares import EvidenceMiddleware
+from deepresearch.middlewares import EvidenceMiddleware, PlanContextMiddleware
 from deepresearch.state import ResearchState, create_initial_state
-from deepresearch.tools import read_page_tool, web_search_tool
+from deepresearch.tools import (
+    read_page_tool,
+    update_plan_step_tool,
+    web_search_tool,
+    write_research_plan_tool,
+)
 
 
 BASE_SYSTEM_PROMPT = """你是一个严谨的研究助手。
@@ -31,6 +36,8 @@ BASE_SYSTEM_PROMPT = """你是一个严谨的研究助手。
 
 SEARCH_SYSTEM_PROMPT = """你是一个严谨的研究助手，可以使用 web_search 搜索公开网页，
 并使用 read_page 读取重要来源的正文。
+开始研究前必须先调用 write_research_plan 创建 2 到 5 个有顺序的步骤；完成一个步骤后，
+调用 update_plan_step 更新状态，再继续下一步。
 涉及实时信息、具体事实或用户要求来源时，应先搜索再回答。使用简洁、具体的搜索关键词；
 对关键结论应优先读取 2 到 3 个最相关、尽量权威的来源，而不是只依赖搜索摘要。
 不得编造搜索结果或网页内容。最终回答要列出实际使用过的来源标题和 URL；如果工具失败，请明确说明。
@@ -64,7 +71,12 @@ def build_agent(
     """Compile the model and prompt into LangChain's ReAct agent graph."""
 
     resolved_tools = list(tools or [])
-    middlewares = [EvidenceMiddleware()] if resolved_tools else []
+    tool_names = {tool.name for tool in resolved_tools}
+    middlewares = []
+    if "write_research_plan" in tool_names:
+        middlewares.append(PlanContextMiddleware())
+    if {"web_search", "read_page"}.intersection(tool_names):
+        middlewares.append(EvidenceMiddleware())
     return create_agent(
         model=model,
         tools=resolved_tools,
@@ -117,7 +129,12 @@ def run_question(question: str, settings: Settings | None = None) -> ResearchRes
     return run_with_model(
         question,
         build_model(resolved_settings),
-        tools=[web_search_tool, read_page_tool],
+        tools=[
+            write_research_plan_tool,
+            update_plan_step_tool,
+            web_search_tool,
+            read_page_tool,
+        ],
     )
 
 

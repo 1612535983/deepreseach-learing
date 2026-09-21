@@ -44,6 +44,7 @@ def _tool_text(message: ToolMessage) -> str:
 def parse_web_search_evidence(
     content: str,
     fallback_query: str = "",
+    step_id: str | None = None,
 ) -> EvidenceUpdate:
     """Convert one web_search JSON response into a ResearchState patch."""
 
@@ -56,6 +57,8 @@ def parse_web_search_evidence(
             "result_count": 0,
             "error": f"Invalid web_search response: {exc}",
         }
+        if step_id:
+            record["step_id"] = step_id
         return {"search_records": [record], "sources": [], "observations": []}
 
     if not isinstance(payload, dict):
@@ -65,6 +68,8 @@ def parse_web_search_evidence(
             "result_count": 0,
             "error": "Invalid web_search response: expected a JSON object",
         }
+        if step_id:
+            record["step_id"] = step_id
         return {"search_records": [record], "sources": [], "observations": []}
 
     query = str(payload.get("query") or fallback_query).strip()
@@ -79,6 +84,8 @@ def parse_web_search_evidence(
         "result_count": len(results),
         "error": error,
     }
+    if step_id:
+        record["step_id"] = step_id
     sources: list[Source] = []
     observations: list[Observation] = []
     if success:
@@ -104,6 +111,7 @@ def parse_web_search_evidence(
                         "content": snippet,
                         "source_url": url,
                         "query": query,
+                        **({"step_id": step_id} if step_id else {}),
                     }
                 )
 
@@ -117,6 +125,7 @@ def parse_web_search_evidence(
 def parse_read_page_evidence(
     content: str,
     fallback_url: str = "",
+    step_id: str | None = None,
 ) -> EvidenceUpdate:
     """Convert one read_page JSON response into a ResearchState patch."""
 
@@ -131,6 +140,8 @@ def parse_read_page_evidence(
             "truncated": False,
             "error": f"Invalid read_page response: {exc}",
         }
+        if step_id:
+            record["step_id"] = step_id
         return {"page_records": [record], "sources": [], "observations": []}
 
     if not isinstance(payload, dict):
@@ -142,6 +153,8 @@ def parse_read_page_evidence(
             "truncated": False,
             "error": "Invalid read_page response: expected a JSON object",
         }
+        if step_id:
+            record["step_id"] = step_id
         return {"page_records": [record], "sources": [], "observations": []}
 
     requested_url = str(payload.get("requested_url") or fallback_url).strip()
@@ -158,6 +171,8 @@ def parse_read_page_evidence(
         "truncated": truncated,
         "error": error,
     }
+    if step_id:
+        record["step_id"] = step_id
     if not success or not final_url:
         return {"page_records": [record], "sources": [], "observations": []}
 
@@ -178,6 +193,7 @@ def parse_read_page_evidence(
                 "source_url": final_url,
                 "query": "",
                 "evidence_type": "page_content",
+                **({"step_id": step_id} if step_id else {}),
             }
         )
     return {
@@ -191,10 +207,20 @@ def _evidence_update(request: ToolCallRequest, result: ToolMessage) -> EvidenceU
     tool_name = request.tool_call.get("name")
     args = request.tool_call.get("args") or {}
     content = _tool_text(result)
+    state = request.state if isinstance(request.state, dict) else {}
+    step_id = state.get("current_step_id")
     if tool_name == "web_search":
-        return parse_web_search_evidence(content, str(args.get("query") or ""))
+        return parse_web_search_evidence(
+            content,
+            str(args.get("query") or ""),
+            step_id,
+        )
     if tool_name == "read_page":
-        return parse_read_page_evidence(content, str(args.get("url") or ""))
+        return parse_read_page_evidence(
+            content,
+            str(args.get("url") or ""),
+            step_id,
+        )
     return None
 
 

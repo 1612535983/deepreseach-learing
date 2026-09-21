@@ -2,7 +2,7 @@
 
 这个项目不是直接复制 Poirot，而是沿着 Poirot 的核心执行链逐层重建：先让最小 Agent 跑通，再按 Git 阶段加入 Tool、Middleware、State、Skill 和其他基础设施。
 
-当前版本是 **阶段 4：可以搜索并读取网页正文的最小 ReAct Agent**：
+当前版本是 **阶段 5：带结构化研究计划的 ReAct Agent**：
 
 ```text
 命令行问题
@@ -16,8 +16,13 @@ create_agent() 编译 Agent Graph
     ├── research_question
     ├── search_records
     ├── page_records
+    ├── plan / current_step_id
     ├── sources / observations
     └── final_report
+    ↓
+PlanContextMiddleware 选择性注入计划进度
+    ↓
+模型首次调用 write_research_plan
     ↓
 模型判断是否调用 web_search
     ├── 不调用 → 直接回答
@@ -26,7 +31,7 @@ create_agent() 编译 Agent Graph
                          EvidenceMiddleware
                          ├── search_records
                          ├── sources（按 URL 去重）
-                         └── observations
+                         └── observations（关联 step_id）
                                 ↓
                          再次调用模型
                                 ↓
@@ -34,7 +39,9 @@ create_agent() 编译 Agent Graph
                                 ↓
                          EvidenceMiddleware
                          ├── page_records
-                         └── 正文 observations
+                         └── 正文 observations（关联 step_id）
+                                ↓
+                         update_plan_step 推进计划
     ↓
 ResearchResult(question, answer, state)
 ```
@@ -43,8 +50,8 @@ ResearchResult(question, answer, state)
 
 - 输入：一个非空的自然语言问题，例如“什么是 ReAct？”
 - 输出：`ResearchResult`，其中包含原始问题、模型最终回答和完整 `ResearchState`。
-- 当前解决的问题：搜索网页、选择关键来源读取正文，并把搜索与读取证据写入结构化 State。
-- 当前不解决的问题：严格引用核验、研究规划、长程状态、Skill、记忆和多 Agent。
+- 当前解决的问题：先创建结构化计划，再按步骤搜索、读取网页，并把证据关联到当前步骤。
+- 当前不解决的问题：强制完成全部步骤、证据充分性反思、正式报告、长期记忆、Skill 和多 Agent。
 
 ## 环境准备
 
@@ -96,7 +103,8 @@ uv run deepresearch run "研究 LangChain Agent" --show-trace
 `sources` 和 `observations`，用于区分真实执行记录与模型生成的自然语言说明。
 
 `run` 模式会把 `web_search` 和 `read_page` 注册给真实模型；模型可以先搜索，
-再选择重要来源读取正文。
+再选择重要来源读取正文。`write_research_plan` 和 `update_plan_step` 负责创建并推进计划。
+`PlanContextMiddleware` 每轮只向模型展示计划进度和聚合计数，不会把完整 State 全量注入。
 `demo` 模式仍使用无工具的 Fake Model，保证在没有网络和 API Key 时也能验证基础链路。
 
 `.env` 已被 `.gitignore` 排除，真实 API Key 不会进入 Git。
@@ -111,6 +119,7 @@ uv run deepresearch run "研究 LangChain Agent" --show-trace
 - **Skill**：告诉 Agent“应该怎样完成某类任务”的过程知识，通常是提示词，不等于 Tool。
 - **Middleware**：插在 Agent 生命周期中的横切逻辑，例如模型调用前注入 Skill、工具调用后收集证据。
 - **State**：Graph 节点之间共享的数据，例如消息、来源、研究计划和最终报告。
+- **上下文投影**：从完整 State 中筛选当前模型真正需要的字段；本项目只投影计划和聚合进度，不投影全部内部数据。
 
 ## 分阶段复现路线
 
@@ -120,11 +129,12 @@ uv run deepresearch run "研究 LangChain Agent" --show-trace
 2. **阶段 1（已完成）— 第一个 Tool**：增加 `web_search`，让模型产生 tool call，并把搜索结果返回模型。
 3. **阶段 2（已完成）— 研究 State**：加入 `search_records`、`sources`、`observations`、`research_question` 和 reducer。
 4. **阶段 3（已完成）— 第一个 Middleware**：由 Evidence Middleware 把工具结果整理为证据，并提供真实执行 Trace。
-5. **阶段 4（当前）— 网页正文读取**：增加安全 URL 校验和 `read_page`，把关键网页正文沉淀为证据。
-6. **阶段 5 — 研究闭环**：加入 Todo/Plan、证据充分性检查和最终报告生成。
-7. **阶段 6 — Skill**：把“如何检索、如何核验来源、如何写报告”做成可选择和注入的过程知识。
-8. **阶段 7 — 工程能力**：持久化 checkpointer、流式输出、日志、错误恢复和测试评估。
-9. **阶段 8 — 高级能力**：MCP、记忆、Sandbox、多 Agent；这些不要提前加入最小主链。
+5. **阶段 4（已完成）— 网页正文读取**：增加安全 URL 校验和 `read_page`，把关键网页正文沉淀为证据。
+6. **阶段 5（当前）— 结构化研究计划**：模型创建和推进 Plan，Middleware 选择性注入进度，证据关联步骤。
+7. **阶段 6 — 研究闭环**：加入证据充分性反思、受限继续循环和最终报告生成。
+8. **阶段 7 — Skill**：把“如何检索、如何核验来源、如何写报告”做成可选择和注入的过程知识。
+9. **阶段 8 — 工程能力**：持久化 checkpointer、流式输出、日志、错误恢复和测试评估。
+10. **阶段 9 — 高级能力**：MCP、记忆、Sandbox、多 Agent；这些不要提前加入最小主链。
 
 ## Git 管理建议
 
@@ -154,7 +164,9 @@ git commit -m "feat: add web search tool"
 | `src/deepresearch/state.py` | `agents/state/types.py` + `reducers.py` | 定义共享研究状态和合并规则 |
 | `src/deepresearch/tools/web_search.py` | `agents/agent_tools/builtin/ddg_search.py` | 执行网页搜索 |
 | `src/deepresearch/tools/read_page.py` | 网页读取类 Tool | 安全下载并提取网页正文 |
+| `src/deepresearch/tools/research_plan.py` | Todo/计划类状态 Tool | 创建计划并推进步骤状态 |
 | `src/deepresearch/middlewares/evidence.py` | `agents/middlewares/evidence_middleware.py` | 把搜索和正文结果沉淀为结构化证据 |
+| `src/deepresearch/middlewares/plan_context.py` | 计划上下文 Middleware | 选择性向模型暴露计划进度 |
 | `build_agent()` | `agents/leader/factory.py` | 编译 Agent Graph |
 | `run_with_model()` | `agents/leader/agent.py` | 执行 Graph 并整理输出 |
 | `ResearchResult` | `AgentRunResult` | 稳定的输出边界 |

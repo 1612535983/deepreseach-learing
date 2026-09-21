@@ -7,7 +7,7 @@ tool results.
 
 from __future__ import annotations
 
-from typing import Annotated, NotRequired, TypedDict
+from typing import Annotated, Literal, NotRequired, TypedDict
 
 from langchain.agents import AgentState
 from langchain_core.messages import HumanMessage
@@ -20,6 +20,7 @@ class SearchRecord(TypedDict):
     success: bool
     result_count: int
     error: str | None
+    step_id: NotRequired[str]
 
 
 class Source(TypedDict):
@@ -40,6 +41,7 @@ class PageRecord(TypedDict):
     content_chars: int
     truncated: bool
     error: str | None
+    step_id: NotRequired[str]
 
 
 class Observation(TypedDict):
@@ -49,6 +51,25 @@ class Observation(TypedDict):
     source_url: str
     query: str
     evidence_type: NotRequired[str]
+    step_id: NotRequired[str]
+
+
+PlanStatus = Literal["pending", "in_progress", "completed", "failed"]
+
+
+class PlanStep(TypedDict):
+    """One explicit unit of work in the research plan."""
+
+    step_id: str
+    title: str
+    status: PlanStatus
+
+
+class ResearchPlan(TypedDict):
+    """The structured goal and ordered steps for one research run."""
+
+    goal: str
+    steps: list[PlanStep]
 
 
 def append_search_records(
@@ -110,6 +131,15 @@ def merge_final_report(current: str | None, incoming: str | None) -> str | None:
     return incoming if incoming is not None else current
 
 
+def merge_plan(
+    current: ResearchPlan | None,
+    incoming: ResearchPlan | None,
+) -> ResearchPlan | None:
+    """Replace the plan with an explicit update, preserving it on null patches."""
+
+    return incoming if incoming is not None else current
+
+
 class ResearchState(AgentState):
     """The shared blackboard for one research graph execution."""
 
@@ -118,6 +148,8 @@ class ResearchState(AgentState):
     page_records: Annotated[list[PageRecord], append_page_records]
     sources: Annotated[list[Source], merge_sources]
     observations: Annotated[list[Observation], append_observations]
+    plan: Annotated[ResearchPlan | None, merge_plan]
+    current_step_id: NotRequired[str | None]
     final_report: Annotated[str | None, merge_final_report]
 
 
@@ -131,5 +163,7 @@ def create_initial_state(question: str) -> ResearchState:
         "page_records": [],
         "sources": [],
         "observations": [],
+        "plan": None,
+        "current_step_id": None,
         "final_report": None,
     }

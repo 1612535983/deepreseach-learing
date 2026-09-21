@@ -8,12 +8,21 @@ def make_state() -> ResearchState:
     return {
         "messages": [HumanMessage(content="研究问题")],
         "research_question": "研究问题",
+        "plan": {
+            "goal": "完成研究问题",
+            "steps": [
+                {"step_id": "step-1", "title": "收集资料", "status": "completed"},
+                {"step_id": "step-2", "title": "核验资料", "status": "in_progress"},
+            ],
+        },
+        "current_step_id": "step-2",
         "search_records": [
             {
                 "query": "successful query",
                 "success": True,
                 "result_count": 3,
                 "error": None,
+                "step_id": "step-1",
             },
             {
                 "query": "empty query",
@@ -36,6 +45,7 @@ def make_state() -> ResearchState:
                 "content_chars": 1234,
                 "truncated": False,
                 "error": None,
+                "step_id": "step-2",
             },
             {
                 "requested_url": "https://example.com/missing",
@@ -91,3 +101,6 @@ def test_format_trace_includes_queries_errors_and_sources() -> None:
     assert "https://example.com/docs" in trace
     assert "网页读取次数：2" in trace
     assert "HTTP 404" in trace
+    assert "目标：完成研究问题" in trace
+    assert "[进行中] step-2: 核验资料" in trace
+    assert "计划步骤：step-1" in trace
