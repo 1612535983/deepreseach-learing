@@ -23,6 +23,8 @@ create_agent() 编译 Agent Graph
     ↓
 PlanContextMiddleware 选择性注入计划进度
     ↓
+SequentialToolCallMiddleware 禁止并行 Tool Call
+    ↓
 模型首次调用 write_research_plan
     ↓
 模型判断是否调用 web_search
@@ -135,6 +137,8 @@ LLM 负责生成 Markdown 内容；`write_final_report` Tool 负责校验引用�
 研究完成后，模型必须调用 `write_final_report`，并提交 Markdown 内容和实际引用的 URL。
 Tool 会确认研究已经完成、至少引用两个收集过的来源，而且声明的 URL 确实出现在报告正文中。
 `PlanContextMiddleware` 每轮只向模型展示计划进度和聚合计数，不会把完整 State 全量注入。
+`SequentialToolCallMiddleware` 会向模型绑定层传入 `parallel_tool_calls=False`，确保会更新
+Plan 和 `current_step_id` 的 Tool 逐轮执行，避免多个 `Command` 同时写入同一个 State 字段。
 `ReflectionMiddleware` 在模型不再调用 Tool、准备结束时读取 State，检查计划是否完成、
 来源和 Observation 是否达到最小数量、是否成功读取过网页正文。检查不调用额外 LLM；
 如果不满足，会把缺口交给下一轮模型，但最多回跳 2 次，避免无限循环。
@@ -205,6 +209,7 @@ git commit -m "feat: add web search tool"
 | `src/deepresearch/tools/final_report.py` | 最终产物 Tool | 校验报告与来源，并把 Markdown 保存到 State |
 | `src/deepresearch/middlewares/evidence.py` | `agents/middlewares/evidence_middleware.py` | 把搜索和正文结果沉淀为结构化证据 |
 | `src/deepresearch/middlewares/plan_context.py` | 计划上下文 Middleware | 选择性向模型暴露计划进度 |
+| `src/deepresearch/middlewares/sequential_tools.py` | Tool 调度 Middleware | 禁止并行 Tool Call，避免 State 并发写冲突 |
 | `src/deepresearch/middlewares/reflection.py` | 反思/质量控制 Middleware | 在结束前检查缺口，并有限次回到模型 |
 | `src/deepresearch/reporting.py` | 输出层 | 显示 Trace，并把 `final_report` 写成 `.md` 文件 |
 | `build_agent()` | `agents/leader/factory.py` | 编译 Agent Graph |

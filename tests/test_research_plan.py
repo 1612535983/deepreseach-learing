@@ -19,8 +19,12 @@ search_module = importlib.import_module("deepresearch.tools.web_search")
 
 class CapturingToolModel(FakeMessagesListChatModel):
     captured_calls: ClassVar[list[list]] = []
+    captured_bind_kwargs: ClassVar[list[dict]] = []
 
     def bind_tools(self, tools, *, tool_choice=None, **kwargs):  # noqa: ANN001, ANN003
+        self.captured_bind_kwargs.append(
+            {"tool_choice": tool_choice, **kwargs}
+        )
         return self
 
     def _generate(self, messages, stop=None, run_manager=None, **kwargs):  # noqa: ANN001, ANN003, ANN201
@@ -84,6 +88,7 @@ def test_plan_context_exposes_progress_but_not_raw_evidence() -> None:
 def test_agent_creates_plan_links_evidence_and_advances_step(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(search_module, "DDGS", FakeDDGS)
     CapturingToolModel.captured_calls.clear()
+    CapturingToolModel.captured_bind_kwargs.clear()
     model = CapturingToolModel(
         responses=[
             AIMessage(
@@ -145,3 +150,8 @@ def test_agent_creates_plan_links_evidence_and_advances_step(monkeypatch) -> Non
     second_context = system_text(CapturingToolModel.captured_calls[1])
     assert "No research plan exists yet" in first_context
     assert "研究目标：研究 LangChain Agent" in second_context
+    assert CapturingToolModel.captured_bind_kwargs
+    assert all(
+        kwargs["parallel_tool_calls"] is False
+        for kwargs in CapturingToolModel.captured_bind_kwargs
+    )

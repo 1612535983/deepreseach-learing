@@ -18,6 +18,7 @@ from deepresearch.middlewares import (
     EvidenceMiddleware,
     PlanContextMiddleware,
     ReflectionMiddleware,
+    SequentialToolCallMiddleware,
 )
 from deepresearch.state import ResearchState, create_initial_state
 from deepresearch.tools import (
@@ -38,6 +39,7 @@ SEARCH_SYSTEM_PROMPT = """你是一个严谨的研究助手，可以使用 web_s
 并使用 read_page 读取重要来源的正文。
 开始研究前必须先调用 write_research_plan 创建 2 到 5 个有顺序的步骤；完成一个步骤后，
 调用 update_plan_step 更新状态，再继续下一步。
+每轮只调用一个 Tool，等待它更新 State 后再决定下一步，不要批量调用多个 Tool。
 涉及实时信息、具体事实或用户要求来源时，应先搜索再回答。使用简洁、具体的搜索关键词；
 对关键结论应优先读取 2 到 3 个最相关、尽量权威的来源，而不是只依赖搜索摘要。
 不得编造搜索结果或网页内容。完成计划和证据收集后，必须调用 write_final_report，
@@ -74,6 +76,13 @@ def build_agent(
     resolved_tools = list(tools or [])
     tool_names = {tool.name for tool in resolved_tools}
     middlewares = []
+    state_mutating_tools = {
+        "write_research_plan",
+        "update_plan_step",
+        "write_final_report",
+    }
+    if state_mutating_tools.intersection(tool_names):
+        middlewares.append(SequentialToolCallMiddleware())
     if "write_research_plan" in tool_names:
         middlewares.append(PlanContextMiddleware())
     if {"web_search", "read_page"}.intersection(tool_names):
