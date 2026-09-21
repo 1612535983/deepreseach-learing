@@ -2,7 +2,7 @@
 
 这个项目不是直接复制 Poirot，而是沿着 Poirot 的核心执行链逐层重建：先让最小 Agent 跑通，再按 Git 阶段加入 Tool、Middleware、State、Skill 和其他基础设施。
 
-当前版本是 **阶段 7：支持工作流事件和 CLI 流式显示的研究 Agent**：
+当前版本是 **阶段 8A：接入进程内 Checkpointer 的研究 Agent**：
 
 ```text
 命令行问题
@@ -19,7 +19,8 @@ create_agent() 编译 Agent Graph
     ├── plan / current_step_id
     ├── reflection_attempts / research_gaps
     ├── sources / observations
-    └── final_report
+    ├── final_report
+    └── InMemory Checkpointer（按 thread_id 保存快照）
     ↓
 PlanContextMiddleware 选择性注入计划进度
     ↓
@@ -74,6 +75,16 @@ Compiled Agent Graph
     └── stream()  → updates 转 ResearchEvent，values 保存最终 State
                                       ↓
                                 CLI 实时显示
+```
+
+Checkpointer 在 `create_agent()` 时装入 Graph；运行时通过 config 提供 `thread_id`：
+
+```text
+InMemorySaver → create_agent(checkpointer=...)
+                         ↓
+graph.stream(..., config={"configurable": {"thread_id": "research-001"}})
+                         ↓
+LangGraph 在每个执行步骤后自动保存 State
 ```
 
 ## 输入和输出
@@ -152,6 +163,18 @@ uv run deepresearch run "研究 LangChain Agent" \
 `--stream` 使用程序根据真实 Graph 更新生成的 `ResearchEvent`，不是让 LLM 描述自己做了什么。
 流式执行结束后仍会返回完整 `ResearchResult`，因此 Trace 和 Markdown 导出可以继续使用。
 
+为当前运行指定 Checkpoint 任务 ID：
+
+```bash
+uv run deepresearch run "研究 LangChain Agent" \
+  --thread-id research-001 \
+  --stream
+```
+
+当前使用 `InMemorySaver`：它会自动保存并隔离不同 `thread_id` 的 State，但数据只在当前
+Python 进程中存在。重新执行 CLI 会启动新进程，因此现阶段不能跨命令恢复；下一阶段会把
+相同接口替换成 SQLite Checkpointer。
+
 `--show-trace` 中的统计不调用 LLM；它直接读取 `search_records`、`page_records`、
 `sources` 和 `observations`，用于区分真实执行记录与模型生成的自然语言说明。
 
@@ -184,6 +207,7 @@ Plan 和 `current_step_id` 的 Tool 逐轮执行，避免多个 `Command` 同时
 - **回跳（jump_to）**：Middleware 返回的图路由指令。`jump_to="model"` 表示当前不结束，重新执行模型节点。
 - **Markdown**：一种纯文本格式。LLM 生成 Markdown 字符串，Python 再把字符串写入 `.md` 文件。
 - **ResearchEvent**：由 LangGraph 原始更新转换出的稳定应用事件，用于 CLI，未来也可以用于 SSE 或 WebSocket。
+- **Checkpointer**：在 Graph 执行步骤结束后自动保存 State 快照；`thread_id` 用来区分任务。
 
 ## 分阶段复现路线
 
@@ -197,12 +221,13 @@ Plan 和 `current_step_id` 的 Tool 逐轮执行，避免多个 `Command` 同时
 6. **阶段 5（已完成）— 结构化研究计划**：模型创建和推进 Plan，Middleware 选择性注入进度，证据关联步骤。
 7. **阶段 6A（已完成）— 受限研究反思**：程序检查计划和证据，通过 `jump_to` 最多继续研究 2 次。
 8. **阶段 6B（已完成）— 最终报告**：校验报告引用，保存到 `final_report`，并由 CLI 导出 `.md` 文件。
-9. **阶段 7（当前）— 流式输出**：把 `stream()/astream()` 更新转换成统一事件，并在 CLI 实时显示。
-10. **阶段 8 — Checkpointer**：用 SQLite 保存任务 State，支持 `thread_id`、中断和恢复。
-11. **阶段 9 — 上下文管理**：选择当前模型真正需要的消息、计划、证据和 Token 预算。
-12. **阶段 10 — 记忆系统**：区分任务短期记忆和可跨任务检索的长期记忆。
-13. **阶段 11 — Skill**：在上下文预算内加载“如何检索、核验来源、写报告”的过程知识。
-14. **后续阶段**：错误恢复与预算、评估、MCP、Sandbox、API/前端，最后再考虑多 Agent。
+9. **阶段 7（已完成）— 流式输出**：把 `stream()/astream()` 更新转换成统一事件，并在 CLI 实时显示。
+10. **阶段 8A（当前）— 内存 Checkpointer**：把 Checkpointer 装入 Graph，通过 config 的 `thread_id` 自动保存和隔离 State。
+11. **阶段 8B — SQLite Checkpointer**：让 Checkpoint 跨进程持久化，并增加中断恢复和任务检查命令。
+12. **阶段 9 — 上下文管理**：选择当前模型真正需要的消息、计划、证据和 Token 预算。
+13. **阶段 10 — 记忆系统**：区分任务短期记忆和可跨任务检索的长期记忆。
+14. **阶段 11 — Skill**：在上下文预算内加载“如何检索、核验来源、写报告”的过程知识。
+15. **后续阶段**：错误恢复与预算、评估、MCP、Sandbox、API/前端，最后再考虑多 Agent。
 
 ## Git 管理建议
 
@@ -229,6 +254,7 @@ git commit -m "feat: add web search tool"
 |---|---|---|
 | `src/deepresearch/cli.py` | `backend/app/cli/main.py` | 接收用户输入 |
 | `src/deepresearch/config.py` | `backend/agents/config/` | 读取模型配置 |
+| `src/deepresearch/checkpointing.py` | Checkpoint 配置层 | 创建 Saver、生成 `thread_id` 和运行 config |
 | `src/deepresearch/events.py` | Agent 事件协议 | 把 LangGraph 原始更新转换成稳定的 `ResearchEvent` |
 | `src/deepresearch/state.py` | `agents/state/types.py` + `reducers.py` | 定义共享研究状态和合并规则 |
 | `src/deepresearch/tools/web_search.py` | `agents/agent_tools/builtin/ddg_search.py` | 执行网页搜索 |

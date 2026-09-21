@@ -49,6 +49,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="实时显示计划、Tool、证据和反思进度",
     )
+    run.add_argument(
+        "--thread-id",
+        help="为当前进程内的 InMemory Checkpoint 指定任务 ID",
+    )
     return parser
 
 
@@ -59,9 +63,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "demo":
             result = run_demo(args.question)
         elif args.stream:
-            result = stream_question(args.question, _print_event)
+            result = stream_question(
+                args.question,
+                _print_event,
+                thread_id=args.thread_id,
+            )
         else:
-            result = run_question(args.question)
+            result = run_question(args.question, thread_id=args.thread_id)
         output_path = None
         if args.command == "run" and args.output:
             output_path = save_markdown_report(result.state, args.output)
@@ -72,6 +80,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if getattr(args, "stream", False):
         print()
     print(result.answer)
+    if result.thread_id is not None:
+        print()
+        print(f"任务 ID：{result.thread_id}（仅当前进程内有效）")
     if output_path is not None:
         print()
         print(f"报告已保存：{output_path}")

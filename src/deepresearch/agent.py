@@ -12,7 +12,12 @@ from langchain_core.language_models.fake_chat_models import FakeMessagesListChat
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
+from langgraph.checkpoint.base import BaseCheckpointSaver
 
+from deepresearch.checkpointing import (
+    get_default_in_memory_checkpointer,
+    resolve_checkpoint_run,
+)
 from deepresearch.config import Settings
 from deepresearch.events import ResearchEvent, events_from_update
 from deepresearch.middlewares import (
@@ -55,6 +60,7 @@ class ResearchResult:
     question: str
     answer: str
     state: ResearchState
+    thread_id: str | None = None
 
 
 def build_model(settings: Settings) -> BaseChatModel:
@@ -71,6 +77,7 @@ def build_model(settings: Settings) -> BaseChatModel:
 def build_agent(
     model: BaseChatModel,
     tools: Sequence[BaseTool] | None = None,
+    checkpointer: BaseCheckpointSaver | None = None,
 ) -> Any:
     """Compile the model and prompt into LangChain's ReAct agent graph."""
 
@@ -102,6 +109,7 @@ def build_agent(
         middleware=middlewares,
         system_prompt=SEARCH_SYSTEM_PROMPT if resolved_tools else BASE_SYSTEM_PROMPT,
         state_schema=ResearchState,
+        checkpointer=checkpointer,
     )
 
 
@@ -117,7 +125,11 @@ def _message_text(message: AIMessage) -> str:
     return str(content)
 
 
-def _result_from_state(question: str, state: ResearchState) -> ResearchResult:
+def _result_from_state(
+    question: str,
+    state: ResearchState,
+    thread_id: str | None = None,
+) -> ResearchResult:
     """Build the public result shared by invoke and stream execution paths."""
 
     final_message = state["messages"][-1]
@@ -127,6 +139,7 @@ def _result_from_state(question: str, state: ResearchState) -> ResearchResult:
         question=question,
         answer=state.get("final_report") or _message_text(final_message),
         state=state,
+        thread_id=thread_id,
     )
 
 
@@ -134,6 +147,9 @@ def run_with_model(
     question: str,
     model: BaseChatModel,
     tools: Sequence[BaseTool] | None = None,
+    *,
+    checkpointer: BaseCheckpointSaver | None = None,
+    thread_id: str | None = None,
 ) -> ResearchResult:
     """Run one question through a supplied model and return the final answer."""
 
@@ -141,9 +157,10 @@ def run_with_model(
     if not normalized_question:
         raise ValueError("研究问题不能为空。")
 
-    graph = build_agent(model, tools=tools)
-    state = graph.invoke(create_initial_state(normalized_question))
-    return _result_from_state(normalized_question, state)
+    resolved_thread_id, config = resolve_checkpoint_run(checkpointer, thread_id)
+    graph = build_agent(model, tools=tools, checkpointer=checkpointer)
+    state = graph.invoke(create_initial_state(normalized_question), config=config)
+    return _result_from_state(normalized_question, state, resolved_thread_id)
 
 
 def stream_with_model(
@@ -152,6 +169,8 @@ def stream_with_model(
     tools: Sequence[BaseTool] | None = None,
     *,
     on_event: Callable[[ResearchEvent], None],
+    checkpointer: BaseCheckpointSaver | None = None,
+    thread_id: str | None = None,
 ) -> ResearchResult:
     """Run the graph once while synchronously delivering progress events."""
 
@@ -159,18 +178,27 @@ def stream_with_model(
     if not normalized_question:
         raise ValueError("研究问题不能为空。")
 
-    graph = build_agent(model, tools=tools)
+    resolved_thread_id, config = resolve_checkpoint_run(checkpointer, thread_id)
+    graph = build_agent(model, tools=tools, checkpointer=checkpointer)
     final_state: ResearchState | None = None
     on_event(
         ResearchEvent(
             "run_started",
             f"研究开始：{normalized_question}",
-            {"question": normalized_question},
+            {
+                "question": normalized_question,
+                **(
+                    {"thread_id": resolved_thread_id}
+                    if resolved_thread_id is not None
+                    else {}
+                ),
+            },
         )
     )
     try:
         for mode, data in graph.stream(
             create_initial_state(normalized_question),
+            config=config,
             stream_mode=["updates", "values"],
         ):
             if mode == "updates":
@@ -190,7 +218,11 @@ def stream_with_model(
 
     if final_state is None:
         raise RuntimeError("Agent 流式执行没有返回最终 State。")
-    result = _result_from_state(normalized_question, final_state)
+    result = _result_from_state(
+        normalized_question,
+        final_state,
+        resolved_thread_id,
+    )
     on_event(
         ResearchEvent(
             "run_completed",
@@ -198,6 +230,11 @@ def stream_with_model(
             {
                 "source_count": len(final_state.get("sources", [])),
                 "has_report": bool(final_state.get("final_report")),
+                **(
+                    {"thread_id": resolved_thread_id}
+                    if resolved_thread_id is not None
+                    else {}
+                ),
             },
         )
     )
@@ -210,6 +247,8 @@ async def astream_with_model(
     tools: Sequence[BaseTool] | None = None,
     *,
     on_event: Callable[[ResearchEvent], Awaitable[None]],
+    checkpointer: BaseCheckpointSaver | None = None,
+    thread_id: str | None = None,
 ) -> ResearchResult:
     """Run the graph once while asynchronously delivering progress events."""
 
@@ -217,18 +256,27 @@ async def astream_with_model(
     if not normalized_question:
         raise ValueError("研究问题不能为空。")
 
-    graph = build_agent(model, tools=tools)
+    resolved_thread_id, config = resolve_checkpoint_run(checkpointer, thread_id)
+    graph = build_agent(model, tools=tools, checkpointer=checkpointer)
     final_state: ResearchState | None = None
     await on_event(
         ResearchEvent(
             "run_started",
             f"研究开始：{normalized_question}",
-            {"question": normalized_question},
+            {
+                "question": normalized_question,
+                **(
+                    {"thread_id": resolved_thread_id}
+                    if resolved_thread_id is not None
+                    else {}
+                ),
+            },
         )
     )
     try:
         async for mode, data in graph.astream(
             create_initial_state(normalized_question),
+            config=config,
             stream_mode=["updates", "values"],
         ):
             if mode == "updates":
@@ -248,7 +296,11 @@ async def astream_with_model(
 
     if final_state is None:
         raise RuntimeError("Agent 流式执行没有返回最终 State。")
-    result = _result_from_state(normalized_question, final_state)
+    result = _result_from_state(
+        normalized_question,
+        final_state,
+        resolved_thread_id,
+    )
     await on_event(
         ResearchEvent(
             "run_completed",
@@ -256,6 +308,11 @@ async def astream_with_model(
             {
                 "source_count": len(final_state.get("sources", [])),
                 "has_report": bool(final_state.get("final_report")),
+                **(
+                    {"thread_id": resolved_thread_id}
+                    if resolved_thread_id is not None
+                    else {}
+                ),
             },
         )
     )
@@ -274,14 +331,27 @@ def _research_tools() -> list[BaseTool]:
     ]
 
 
-def run_question(question: str, settings: Settings | None = None) -> ResearchResult:
+def run_question(
+    question: str,
+    settings: Settings | None = None,
+    *,
+    checkpointer: BaseCheckpointSaver | None = None,
+    thread_id: str | None = None,
+) -> ResearchResult:
     """Run a real model request using explicit settings or the local .env file."""
 
     resolved_settings = settings or Settings.from_env()
+    resolved_checkpointer = (
+        checkpointer
+        if checkpointer is not None
+        else get_default_in_memory_checkpointer()
+    )
     return run_with_model(
         question,
         build_model(resolved_settings),
         tools=_research_tools(),
+        checkpointer=resolved_checkpointer,
+        thread_id=thread_id,
     )
 
 
@@ -289,15 +359,25 @@ def stream_question(
     question: str,
     on_event: Callable[[ResearchEvent], None],
     settings: Settings | None = None,
+    *,
+    checkpointer: BaseCheckpointSaver | None = None,
+    thread_id: str | None = None,
 ) -> ResearchResult:
     """Run a real model request and synchronously publish progress events."""
 
     resolved_settings = settings or Settings.from_env()
+    resolved_checkpointer = (
+        checkpointer
+        if checkpointer is not None
+        else get_default_in_memory_checkpointer()
+    )
     return stream_with_model(
         question,
         build_model(resolved_settings),
         tools=_research_tools(),
         on_event=on_event,
+        checkpointer=resolved_checkpointer,
+        thread_id=thread_id,
     )
 
 
@@ -305,15 +385,25 @@ async def astream_question(
     question: str,
     on_event: Callable[[ResearchEvent], Awaitable[None]],
     settings: Settings | None = None,
+    *,
+    checkpointer: BaseCheckpointSaver | None = None,
+    thread_id: str | None = None,
 ) -> ResearchResult:
     """Run a real model request and asynchronously publish progress events."""
 
     resolved_settings = settings or Settings.from_env()
+    resolved_checkpointer = (
+        checkpointer
+        if checkpointer is not None
+        else get_default_in_memory_checkpointer()
+    )
     return await astream_with_model(
         question,
         build_model(resolved_settings),
         tools=_research_tools(),
         on_event=on_event,
+        checkpointer=resolved_checkpointer,
+        thread_id=thread_id,
     )
 
 

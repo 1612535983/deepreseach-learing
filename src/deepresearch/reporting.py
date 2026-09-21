@@ -96,6 +96,8 @@ def format_research_event(event: ResearchEvent) -> str:
         "run_failed": "失败",
     }
     lines = [f"[{labels[event.event_type]}] {event.message}"]
+    if event.event_type == "run_started" and event.data.get("thread_id"):
+        lines.append(f'  任务 ID：{event.data["thread_id"]}')
     if event.event_type == "reflection":
         gaps = event.data.get("gaps")
         if isinstance(gaps, list):

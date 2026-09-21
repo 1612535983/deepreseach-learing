@@ -1,5 +1,6 @@
 """Minimal deep-research agent package."""
 
+from deepresearch.checkpointing import create_in_memory_checkpointer
 from deepresearch.agent import (
     ResearchResult,
     astream_question,
@@ -13,6 +14,7 @@ __all__ = [
     "ResearchEvent",
     "ResearchResult",
     "astream_question",
+    "create_in_memory_checkpointer",
     "run_demo",
     "run_question",
     "stream_question",
