@@ -19,6 +19,7 @@ from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 
 from deepresearch.config import Settings
+from deepresearch.state import ResearchState, create_initial_state
 from deepresearch.tools import web_search_tool
 
 
@@ -39,6 +40,7 @@ class ResearchResult:
 
     question: str
     answer: str
+    state: ResearchState
 
 
 def build_model(settings: Settings) -> BaseChatModel:
@@ -63,6 +65,7 @@ def build_agent(
         model=model,
         tools=resolved_tools,
         system_prompt=SEARCH_SYSTEM_PROMPT if resolved_tools else BASE_SYSTEM_PROMPT,
+        state_schema=ResearchState,
     )
 
 
@@ -90,9 +93,7 @@ def run_with_model(
         raise ValueError("研究问题不能为空。")
 
     graph = build_agent(model, tools=tools)
-    state = graph.invoke(
-        {"messages": [{"role": "user", "content": normalized_question}]}
-    )
+    state = graph.invoke(create_initial_state(normalized_question))
     final_message = state["messages"][-1]
     if not isinstance(final_message, AIMessage):
         raise RuntimeError("Agent 没有返回 AIMessage。")
@@ -100,6 +101,7 @@ def run_with_model(
     return ResearchResult(
         question=normalized_question,
         answer=_message_text(final_message),
+        state=state,
     )
 
 

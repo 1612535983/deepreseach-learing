@@ -9,6 +9,8 @@ def test_offline_demo_runs_complete_agent_graph() -> None:
 
     assert result.question == "测试问题"
     assert "最小链路已跑通" in result.answer
+    assert result.state["research_question"] == "测试问题"
+    assert result.state["search_records"] == []
 
 
 def test_agent_returns_model_answer() -> None:
@@ -20,4 +22,4 @@ def test_agent_returns_model_answer() -> None:
 
     assert result.question == "什么是 ReAct？"
     assert result.answer == "这是模型答案"
-
+    assert result.state["sources"] == []
