@@ -150,6 +150,8 @@ class ResearchState(AgentState):
     observations: Annotated[list[Observation], append_observations]
     plan: Annotated[ResearchPlan | None, merge_plan]
     current_step_id: NotRequired[str | None]
+    reflection_attempts: NotRequired[int]
+    research_gaps: NotRequired[list[str]]
     final_report: Annotated[str | None, merge_final_report]
 
 
@@ -165,5 +167,7 @@ def create_initial_state(question: str) -> ResearchState:
         "observations": [],
         "plan": None,
         "current_step_id": None,
+        "reflection_attempts": 0,
+        "research_gaps": [],
         "final_report": None,
     }

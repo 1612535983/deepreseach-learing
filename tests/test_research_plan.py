@@ -67,12 +67,16 @@ def test_plan_context_exposes_progress_but_not_raw_evidence() -> None:
             "query": "secret",
         }
     ]
+    state["reflection_attempts"] = 1
+    state["research_gaps"] = ["还需要读取一个网页正文。"]
 
     context = format_plan_context(state)
 
     assert "研究 Agent" in context
     assert "step-1" in context
     assert "去重来源数：1" in context
+    assert "还需要读取一个网页正文。" in context
+    assert "当前反思次数：1" in context
     assert "https://secret.example/internal" not in context
     assert "RAW SECRET EVIDENCE" not in context
 

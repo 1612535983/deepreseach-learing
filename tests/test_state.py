@@ -18,6 +18,8 @@ def test_create_initial_state_contains_research_fields() -> None:
     assert state["observations"] == []
     assert state["plan"] is None
     assert state["current_step_id"] is None
+    assert state["reflection_attempts"] == 0
+    assert state["research_gaps"] == []
     assert state["final_report"] is None
 
 

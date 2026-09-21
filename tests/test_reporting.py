@@ -16,6 +16,8 @@ def make_state() -> ResearchState:
             ],
         },
         "current_step_id": "step-2",
+        "reflection_attempts": 1,
+        "research_gaps": ["step-2 尚未完成：核验资料"],
         "search_records": [
             {
                 "query": "successful query",
@@ -104,3 +106,5 @@ def test_format_trace_includes_queries_errors_and_sources() -> None:
     assert "目标：完成研究问题" in trace
     assert "[进行中] step-2: 核验资料" in trace
     assert "计划步骤：step-1" in trace
+    assert "反思次数：1" in trace
+    assert "step-2 尚未完成：核验资料" in trace

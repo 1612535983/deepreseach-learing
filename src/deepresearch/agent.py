@@ -1,9 +1,4 @@
-"""Compile and run the smallest useful agent graph.
-
-At this stage there are intentionally no tools, skills, custom state fields, or
-middleware. Keeping the first graph small makes the core request path easy to
-understand and gives later features a stable baseline.
-"""
+"""Compile and run the research agent graph and its offline demo variant."""
 
 from __future__ import annotations
 
@@ -19,7 +14,11 @@ from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 
 from deepresearch.config import Settings
-from deepresearch.middlewares import EvidenceMiddleware, PlanContextMiddleware
+from deepresearch.middlewares import (
+    EvidenceMiddleware,
+    PlanContextMiddleware,
+    ReflectionMiddleware,
+)
 from deepresearch.state import ResearchState, create_initial_state
 from deepresearch.tools import (
     read_page_tool,
@@ -77,6 +76,8 @@ def build_agent(
         middlewares.append(PlanContextMiddleware())
     if {"web_search", "read_page"}.intersection(tool_names):
         middlewares.append(EvidenceMiddleware())
+    if {"write_research_plan", "web_search", "read_page"}.issubset(tool_names):
+        middlewares.append(ReflectionMiddleware())
     return create_agent(
         model=model,
         tools=resolved_tools,

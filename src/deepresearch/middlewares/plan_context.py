@@ -17,10 +17,13 @@ def format_plan_context(state: ResearchState) -> str:
 
     plan = state.get("plan")
     if not plan:
-        return """<research_plan>
-No research plan exists yet. Before calling web_search or read_page, call
-write_research_plan with a concise goal and 2 to 5 ordered steps.
-</research_plan>"""
+        lines = [
+            "<research_plan>",
+            "No research plan exists yet. Before calling web_search or read_page, call",
+            "write_research_plan with a concise goal and 2 to 5 ordered steps.",
+            "</research_plan>",
+        ]
+        return "\n".join(_append_reflection_context(lines, state))
 
     status_labels = {
         "pending": "待处理",
@@ -49,7 +52,29 @@ write_research_plan with a concise goal and 2 to 5 ordered steps.
             "</research_plan>",
         ]
     )
-    return "\n".join(lines)
+    return "\n".join(_append_reflection_context(lines, state))
+
+
+def _append_reflection_context(
+    lines: list[str],
+    state: ResearchState,
+) -> list[str]:
+    """Append only actionable gap text produced by ReflectionMiddleware."""
+
+    gaps = state.get("research_gaps", [])
+    if not gaps:
+        return lines
+
+    lines.extend(
+        [
+            "<research_gaps>",
+            "上一次回答前的程序检查发现以下缺口，请继续使用工具补充：",
+            *(f"- {gap}" for gap in gaps),
+            f'当前反思次数：{state.get("reflection_attempts", 0)}',
+            "</research_gaps>",
+        ]
+    )
+    return lines
 
 
 def _system_text(message: SystemMessage | None) -> str:
@@ -92,4 +117,3 @@ class PlanContextMiddleware(AgentMiddleware):
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
         return await handler(_with_plan_context(request))
-

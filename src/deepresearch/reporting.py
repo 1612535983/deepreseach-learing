@@ -77,6 +77,19 @@ def format_trace(state: ResearchState) -> str:
     lines.extend(
         [
             "",
+            f'反思次数：{state.get("reflection_attempts", 0)}',
+            "剩余研究缺口：",
+        ]
+    )
+    research_gaps = state.get("research_gaps", [])
+    if not research_gaps:
+        lines.append("（无）")
+    else:
+        lines.extend(f"- {gap}" for gap in research_gaps)
+
+    lines.extend(
+        [
+            "",
             f"搜索次数：{stats.total_searches}",
             f"成功并返回结果：{stats.successful_searches}",
             f"成功但无结果：{stats.empty_searches}",
