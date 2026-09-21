@@ -202,8 +202,10 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "ddgs" },
+    { name = "httpx" },
     { name = "langchain" },
     { name = "langchain-openai" },
+    { name = "lxml" },
     { name = "python-dotenv" },
 ]
 
@@ -215,8 +217,10 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "ddgs", specifier = ">=9,<10" },
+    { name = "httpx", specifier = ">=0.28,<1" },
     { name = "langchain", specifier = ">=1.2,<2" },
     { name = "langchain-openai", specifier = ">=1.1,<2" },
+    { name = "lxml", specifier = ">=5,<7" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8,<10" },
     { name = "python-dotenv", specifier = ">=1.0,<2" },
 ]

@@ -1,6 +1,9 @@
 import json
 
-from deepresearch.middlewares.evidence import parse_web_search_evidence
+from deepresearch.middlewares.evidence import (
+    parse_read_page_evidence,
+    parse_web_search_evidence,
+)
 
 
 def test_successful_search_becomes_structured_evidence() -> None:
@@ -94,3 +97,55 @@ def test_invalid_tool_json_becomes_failed_record() -> None:
     assert record["success"] is False
     assert record["result_count"] == 0
     assert record["error"].startswith("Invalid web_search response")
+
+
+def test_successful_page_read_becomes_page_evidence() -> None:
+    update = parse_read_page_evidence(
+        json.dumps(
+            {
+                "ok": True,
+                "requested_url": "https://example.com/start",
+                "final_url": "https://example.com/article",
+                "title": "Example article",
+                "content": "Full page evidence",
+                "truncated": False,
+            }
+        )
+    )
+
+    assert update["page_records"] == [
+        {
+            "requested_url": "https://example.com/start",
+            "final_url": "https://example.com/article",
+            "success": True,
+            "content_chars": 18,
+            "truncated": False,
+            "error": None,
+        }
+    ]
+    assert update["sources"][0]["url"] == "https://example.com/article"
+    assert update["observations"] == [
+        {
+            "content": "Full page evidence",
+            "source_url": "https://example.com/article",
+            "query": "",
+            "evidence_type": "page_content",
+        }
+    ]
+
+
+def test_failed_page_read_records_error_without_evidence() -> None:
+    update = parse_read_page_evidence(
+        json.dumps(
+            {
+                "ok": False,
+                "requested_url": "http://127.0.0.1/private",
+                "error": "Private addresses are not allowed",
+            }
+        )
+    )
+
+    assert update["page_records"][0]["success"] is False
+    assert update["page_records"][0]["error"] == "Private addresses are not allowed"
+    assert update["sources"] == []
+    assert update["observations"] == []

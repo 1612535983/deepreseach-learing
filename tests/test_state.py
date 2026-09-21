@@ -13,6 +13,7 @@ def test_create_initial_state_contains_research_fields() -> None:
     assert state["research_question"] == "研究 LangChain"
     assert state["messages"][0].content == "研究 LangChain"
     assert state["search_records"] == []
+    assert state["page_records"] == []
     assert state["sources"] == []
     assert state["observations"] == []
     assert state["final_report"] is None

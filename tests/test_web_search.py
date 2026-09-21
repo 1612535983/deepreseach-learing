@@ -5,10 +5,11 @@ from langchain_core.language_models.fake_chat_models import FakeMessagesListChat
 from langchain_core.messages import AIMessage
 
 from deepresearch.agent import run_with_model
-from deepresearch.tools import web_search_tool
+from deepresearch.tools import read_page_tool, web_search_tool
 
 
 search_module = importlib.import_module("deepresearch.tools.web_search")
+read_page_module = importlib.import_module("deepresearch.tools.read_page")
 
 
 class ToolCallingFakeModel(FakeMessagesListChatModel):
@@ -158,3 +159,60 @@ def test_repeated_searches_append_records_and_deduplicate_sources(
     ]
     assert len(result.state["sources"]) == 1
     assert len(result.state["observations"]) == 2
+
+
+def test_agent_can_search_then_read_page(monkeypatch) -> None:  # noqa: ANN001
+    FakeDDGS.queries.clear()
+    monkeypatch.setattr(search_module, "DDGS", FakeDDGS)
+    monkeypatch.setattr(
+        read_page_module,
+        "read_page_content",
+        lambda url, max_chars: {
+            "ok": True,
+            "requested_url": url,
+            "final_url": url,
+            "title": "Example full page",
+            "content": "Detailed evidence from the full page.",
+            "truncated": False,
+        },
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "web_search",
+                        "args": {"query": "agent docs", "max_results": 1},
+                        "id": "search-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "read_page",
+                        "args": {"url": "https://example.com/article", "max_chars": 5000},
+                        "id": "read-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(content="已根据网页正文完成研究"),
+        ]
+    )
+
+    result = run_with_model(
+        "先搜索再读取",
+        model,
+        tools=[web_search_tool, read_page_tool],
+    )
+
+    assert len(result.state["search_records"]) == 1
+    assert len(result.state["page_records"]) == 1
+    assert result.state["page_records"][0]["success"] is True
+    assert len(result.state["sources"]) == 1
+    assert len(result.state["observations"]) == 2
+    assert result.state["observations"][-1]["evidence_type"] == "page_content"

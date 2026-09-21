@@ -21,7 +21,7 @@ from langchain_openai import ChatOpenAI
 from deepresearch.config import Settings
 from deepresearch.middlewares import EvidenceMiddleware
 from deepresearch.state import ResearchState, create_initial_state
-from deepresearch.tools import web_search_tool
+from deepresearch.tools import read_page_tool, web_search_tool
 
 
 BASE_SYSTEM_PROMPT = """你是一个严谨的研究助手。
@@ -29,9 +29,11 @@ BASE_SYSTEM_PROMPT = """你是一个严谨的研究助手。
 请说明当前模式无法可靠回答。
 """
 
-SEARCH_SYSTEM_PROMPT = """你是一个严谨的研究助手，可以使用 web_search 搜索公开网页。
+SEARCH_SYSTEM_PROMPT = """你是一个严谨的研究助手，可以使用 web_search 搜索公开网页，
+并使用 read_page 读取重要来源的正文。
 涉及实时信息、具体事实或用户要求来源时，应先搜索再回答。使用简洁、具体的搜索关键词；
-不得编造搜索结果。最终回答要列出实际使用过的来源标题和 URL；如果搜索失败，请明确说明。
+对关键结论应优先读取 2 到 3 个最相关、尽量权威的来源，而不是只依赖搜索摘要。
+不得编造搜索结果或网页内容。最终回答要列出实际使用过的来源标题和 URL；如果工具失败，请明确说明。
 """
 
 
@@ -115,7 +117,7 @@ def run_question(question: str, settings: Settings | None = None) -> ResearchRes
     return run_with_model(
         question,
         build_model(resolved_settings),
-        tools=[web_search_tool],
+        tools=[web_search_tool, read_page_tool],
     )
 
 

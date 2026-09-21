@@ -28,7 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--show-trace",
         action="store_true",
-        help="显示由程序统计的搜索记录和来源",
+        help="显示由程序统计的搜索、网页读取和来源记录",
     )
     return parser
 

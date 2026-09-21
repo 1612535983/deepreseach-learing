@@ -18,6 +18,9 @@ class ResearchStats:
     returned_results: int
     unique_sources: int
     observation_count: int
+    total_page_reads: int
+    successful_page_reads: int
+    failed_page_reads: int
 
 
 def calculate_stats(state: ResearchState) -> ResearchStats:
@@ -38,6 +41,13 @@ def calculate_stats(state: ResearchState) -> ResearchStats:
         returned_results=sum(record["result_count"] for record in records),
         unique_sources=len(state.get("sources", [])),
         observation_count=len(state.get("observations", [])),
+        total_page_reads=len(state.get("page_records", [])),
+        successful_page_reads=sum(
+            record["success"] for record in state.get("page_records", [])
+        ),
+        failed_page_reads=sum(
+            not record["success"] for record in state.get("page_records", [])
+        ),
     )
 
 
@@ -54,6 +64,9 @@ def format_trace(state: ResearchState) -> str:
         f"原始搜索结果：{stats.returned_results}",
         f"去重后来源：{stats.unique_sources}",
         f"Observation 数量：{stats.observation_count}",
+        f"网页读取次数：{stats.total_page_reads}",
+        f"网页读取成功：{stats.successful_page_reads}",
+        f"网页读取失败：{stats.failed_page_reads}",
         "",
         "搜索记录：",
     ]
@@ -73,6 +86,22 @@ def format_trace(state: ResearchState) -> str:
         if record["error"]:
             lines.append(f'   错误：{record["error"]}')
 
+    lines.extend(["", "网页读取记录："])
+    page_records = state.get("page_records", [])
+    if not page_records:
+        lines.append("（无）")
+    for index, record in enumerate(page_records, start=1):
+        status = "成功" if record["success"] else "失败"
+        lines.append(f'{index}. {record["requested_url"]}')
+        lines.append(
+            f'   状态：{status}；正文字符：{record["content_chars"]}；'
+            f'截断：{"是" if record["truncated"] else "否"}'
+        )
+        if record["final_url"] and record["final_url"] != record["requested_url"]:
+            lines.append(f'   最终地址：{record["final_url"]}')
+        if record["error"]:
+            lines.append(f'   错误：{record["error"]}')
+
     lines.extend(["", "来源："])
     sources = state.get("sources", [])
     if not sources:
@@ -83,4 +112,3 @@ def format_trace(state: ResearchState) -> str:
         lines.append(f'   搜索词：{source["query"]}')
 
     return "\n".join(lines)
-

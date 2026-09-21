@@ -4,22 +4,29 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable
-from typing import Any, TypedDict, override
+from typing import Any, NotRequired, TypedDict, override
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 
-from deepresearch.state import Observation, ResearchState, SearchRecord, Source
+from deepresearch.state import (
+    Observation,
+    PageRecord,
+    ResearchState,
+    SearchRecord,
+    Source,
+)
 
 
 class EvidenceUpdate(TypedDict):
     """A state patch derived from one web search result."""
 
-    search_records: list[SearchRecord]
-    sources: list[Source]
-    observations: list[Observation]
+    search_records: NotRequired[list[SearchRecord]]
+    page_records: NotRequired[list[PageRecord]]
+    sources: NotRequired[list[Source]]
+    observations: NotRequired[list[Observation]]
 
 
 def _tool_text(message: ToolMessage) -> str:
@@ -107,6 +114,90 @@ def parse_web_search_evidence(
     }
 
 
+def parse_read_page_evidence(
+    content: str,
+    fallback_url: str = "",
+) -> EvidenceUpdate:
+    """Convert one read_page JSON response into a ResearchState patch."""
+
+    try:
+        payload = json.loads(content)
+    except (TypeError, json.JSONDecodeError) as exc:
+        record: PageRecord = {
+            "requested_url": fallback_url,
+            "final_url": None,
+            "success": False,
+            "content_chars": 0,
+            "truncated": False,
+            "error": f"Invalid read_page response: {exc}",
+        }
+        return {"page_records": [record], "sources": [], "observations": []}
+
+    if not isinstance(payload, dict):
+        record = {
+            "requested_url": fallback_url,
+            "final_url": None,
+            "success": False,
+            "content_chars": 0,
+            "truncated": False,
+            "error": "Invalid read_page response: expected a JSON object",
+        }
+        return {"page_records": [record], "sources": [], "observations": []}
+
+    requested_url = str(payload.get("requested_url") or fallback_url).strip()
+    success = payload.get("ok") is True
+    final_url = str(payload.get("final_url") or "").strip() or None
+    page_content = str(payload.get("content") or "").strip() if success else ""
+    truncated = bool(payload.get("truncated")) if success else False
+    error = None if success else str(payload.get("error") or "Unknown page read error")
+    record = {
+        "requested_url": requested_url,
+        "final_url": final_url,
+        "success": success,
+        "content_chars": len(page_content),
+        "truncated": truncated,
+        "error": error,
+    }
+    if not success or not final_url:
+        return {"page_records": [record], "sources": [], "observations": []}
+
+    title = str(payload.get("title") or "").strip()
+    sources: list[Source] = [
+        {
+            "title": title,
+            "url": final_url,
+            "snippet": "",
+            "query": "",
+        }
+    ]
+    observations: list[Observation] = []
+    if page_content:
+        observations.append(
+            {
+                "content": page_content,
+                "source_url": final_url,
+                "query": "",
+                "evidence_type": "page_content",
+            }
+        )
+    return {
+        "page_records": [record],
+        "sources": sources,
+        "observations": observations,
+    }
+
+
+def _evidence_update(request: ToolCallRequest, result: ToolMessage) -> EvidenceUpdate | None:
+    tool_name = request.tool_call.get("name")
+    args = request.tool_call.get("args") or {}
+    content = _tool_text(result)
+    if tool_name == "web_search":
+        return parse_web_search_evidence(content, str(args.get("query") or ""))
+    if tool_name == "read_page":
+        return parse_read_page_evidence(content, str(args.get("url") or ""))
+    return None
+
+
 class EvidenceMiddleware(AgentMiddleware):
     """Persist web_search attempts and results alongside the message history."""
 
@@ -119,14 +210,12 @@ class EvidenceMiddleware(AgentMiddleware):
         handler: Callable[[ToolCallRequest], ToolMessage | Command[Any]],
     ) -> ToolMessage | Command[Any]:
         result = handler(request)
-        if request.tool_call.get("name") != "web_search" or not isinstance(
-            result, ToolMessage
-        ):
+        if not isinstance(result, ToolMessage):
             return result
 
-        args = request.tool_call.get("args") or {}
-        fallback_query = str(args.get("query") or "")
-        update = parse_web_search_evidence(_tool_text(result), fallback_query)
+        update = _evidence_update(request, result)
+        if update is None:
+            return result
         return Command(update={"messages": [result], **update})
 
     @override
@@ -138,13 +227,10 @@ class EvidenceMiddleware(AgentMiddleware):
         ],
     ) -> ToolMessage | Command[Any]:
         result = await handler(request)
-        if request.tool_call.get("name") != "web_search" or not isinstance(
-            result, ToolMessage
-        ):
+        if not isinstance(result, ToolMessage):
             return result
 
-        args = request.tool_call.get("args") or {}
-        fallback_query = str(args.get("query") or "")
-        update = parse_web_search_evidence(_tool_text(result), fallback_query)
+        update = _evidence_update(request, result)
+        if update is None:
+            return result
         return Command(update={"messages": [result], **update})
-

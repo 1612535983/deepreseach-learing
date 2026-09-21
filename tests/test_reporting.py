@@ -28,6 +28,24 @@ def make_state() -> ResearchState:
                 "error": "network unavailable",
             },
         ],
+        "page_records": [
+            {
+                "requested_url": "https://example.com/docs",
+                "final_url": "https://example.com/docs",
+                "success": True,
+                "content_chars": 1234,
+                "truncated": False,
+                "error": None,
+            },
+            {
+                "requested_url": "https://example.com/missing",
+                "final_url": None,
+                "success": False,
+                "content_chars": 0,
+                "truncated": False,
+                "error": "HTTP 404",
+            },
+        ],
         "sources": [
             {
                 "title": "Official documentation",
@@ -57,6 +75,9 @@ def test_calculate_stats_uses_recorded_state() -> None:
     assert stats.returned_results == 3
     assert stats.unique_sources == 1
     assert stats.observation_count == 1
+    assert stats.total_page_reads == 2
+    assert stats.successful_page_reads == 1
+    assert stats.failed_page_reads == 1
 
 
 def test_format_trace_includes_queries_errors_and_sources() -> None:
@@ -68,4 +89,5 @@ def test_format_trace_includes_queries_errors_and_sources() -> None:
     assert "network unavailable" in trace
     assert "Official documentation" in trace
     assert "https://example.com/docs" in trace
-
+    assert "网页读取次数：2" in trace
+    assert "HTTP 404" in trace
