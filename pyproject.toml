@@ -9,6 +9,7 @@ dependencies = [
     "httpx>=0.28,<1",
     "langchain>=1.2,<2",
     "langchain-openai>=1.1,<2",
+    "langgraph-checkpoint-sqlite>=3,<4",
     "lxml>=5,<7",
     "python-dotenv>=1.0,<2",
 ]

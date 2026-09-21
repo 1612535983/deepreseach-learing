@@ -2,7 +2,7 @@
 
 这个项目不是直接复制 Poirot，而是沿着 Poirot 的核心执行链逐层重建：先让最小 Agent 跑通，再按 Git 阶段加入 Tool、Middleware、State、Skill 和其他基础设施。
 
-当前版本是 **阶段 8A：接入进程内 Checkpointer 的研究 Agent**：
+当前版本是 **阶段 8B：接入 SQLite 持久化 Checkpointer 的研究 Agent**：
 
 ```text
 命令行问题
@@ -20,7 +20,7 @@ create_agent() 编译 Agent Graph
     ├── reflection_attempts / research_gaps
     ├── sources / observations
     ├── final_report
-    └── InMemory Checkpointer（按 thread_id 保存快照）
+    └── SQLite Checkpointer（按 thread_id 持久化快照）
     ↓
 PlanContextMiddleware 选择性注入计划进度
     ↓
@@ -80,11 +80,15 @@ Compiled Agent Graph
 Checkpointer 在 `create_agent()` 时装入 Graph；运行时通过 config 提供 `thread_id`：
 
 ```text
-InMemorySaver → create_agent(checkpointer=...)
+SqliteSaver → create_agent(checkpointer=...)
                          ↓
 graph.stream(..., config={"configurable": {"thread_id": "research-001"}})
                          ↓
-LangGraph 在每个执行步骤后自动保存 State
+LangGraph 在每个执行步骤后自动把 State 保存到 SQLite
+                         ↓
+下一个 CLI 进程用同一 thread_id 调用 graph.stream(None, config=...)
+                         ↓
+从最近的 Graph 节点继续执行
 ```
 
 ## 输入和输出
@@ -171,9 +175,27 @@ uv run deepresearch run "研究 LangChain Agent" \
   --stream
 ```
 
-当前使用 `InMemorySaver`：它会自动保存并隔离不同 `thread_id` 的 State，但数据只在当前
-Python 进程中存在。重新执行 CLI 会启动新进程，因此现阶段不能跨命令恢复；下一阶段会把
-相同接口替换成 SQLite Checkpointer。
+省略 `--thread-id` 时会自动生成 ID。Checkpoint 默认写入
+`.deepresearch/checkpoints.sqlite`，该目录已被 Git 忽略。新任务不能复用已有 ID，以免把新问题
+合并进旧 State；如果任务中断，应改用：
+
+```bash
+uv run deepresearch resume research-001 --stream
+```
+
+`resume` 不会重新调用 `create_initial_state()`。它把 `None` 作为 Graph 输入，并用相同的
+`thread_id` 读取最近快照；已完成任务会直接返回保存结果，中断任务会从待执行节点继续。
+恢复后的报告也可以配合 `--show-trace` 和 `--output reports/result.md` 使用。
+
+不调用模型、只查看任务的最新持久化摘要：
+
+```bash
+uv run deepresearch inspect research-001
+```
+
+`inspect` 会显示原问题、Checkpoint 时间、Graph 步骤、计划进度以及搜索、来源、证据和报告
+数量。同步 Graph 使用 `SqliteSaver`，异步 Graph 使用 `AsyncSqliteSaver`。不要让两个进程同时
+用同一个 `thread_id` 执行；不同任务应使用不同 ID。
 
 `--show-trace` 中的统计不调用 LLM；它直接读取 `search_records`、`page_records`、
 `sources` 和 `observations`，用于区分真实执行记录与模型生成的自然语言说明。
@@ -208,6 +230,8 @@ Plan 和 `current_step_id` 的 Tool 逐轮执行，避免多个 `Command` 同时
 - **Markdown**：一种纯文本格式。LLM 生成 Markdown 字符串，Python 再把字符串写入 `.md` 文件。
 - **ResearchEvent**：由 LangGraph 原始更新转换出的稳定应用事件，用于 CLI，未来也可以用于 SSE 或 WebSocket。
 - **Checkpointer**：在 Graph 执行步骤结束后自动保存 State 快照；`thread_id` 用来区分任务。
+- **Checkpoint**：某一执行时刻的 State 和 Graph 运行位置；恢复时不需要应用代码手动重放每个 Tool。
+- **SQLite**：单文件关系型数据库。本项目用它持久化 Checkpoint，不用额外启动数据库服务。
 
 ## 分阶段复现路线
 
@@ -222,8 +246,8 @@ Plan 和 `current_step_id` 的 Tool 逐轮执行，避免多个 `Command` 同时
 7. **阶段 6A（已完成）— 受限研究反思**：程序检查计划和证据，通过 `jump_to` 最多继续研究 2 次。
 8. **阶段 6B（已完成）— 最终报告**：校验报告引用，保存到 `final_report`，并由 CLI 导出 `.md` 文件。
 9. **阶段 7（已完成）— 流式输出**：把 `stream()/astream()` 更新转换成统一事件，并在 CLI 实时显示。
-10. **阶段 8A（当前）— 内存 Checkpointer**：把 Checkpointer 装入 Graph，通过 config 的 `thread_id` 自动保存和隔离 State。
-11. **阶段 8B — SQLite Checkpointer**：让 Checkpoint 跨进程持久化，并增加中断恢复和任务检查命令。
+10. **阶段 8A（已完成）— 内存 Checkpointer**：把 Checkpointer 装入 Graph，通过 config 的 `thread_id` 自动保存和隔离 State。
+11. **阶段 8B（当前）— SQLite Checkpointer**：让 Checkpoint 跨进程持久化，并增加 `resume` 和 `inspect` 命令。
 12. **阶段 9 — 上下文管理**：选择当前模型真正需要的消息、计划、证据和 Token 预算。
 13. **阶段 10 — 记忆系统**：区分任务短期记忆和可跨任务检索的长期记忆。
 14. **阶段 11 — Skill**：在上下文预算内加载“如何检索、核验来源、写报告”的过程知识。

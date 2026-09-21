@@ -1,4 +1,8 @@
-from deepresearch.agent import ResearchResult
+from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+from langchain_core.messages import AIMessage
+
+from deepresearch.agent import ResearchResult, run_with_model
+from deepresearch.checkpointing import open_sqlite_checkpointer
 from deepresearch.cli import main
 from deepresearch.events import ResearchEvent
 from deepresearch.state import create_initial_state
@@ -105,4 +109,60 @@ def test_run_passes_thread_id_and_displays_it(monkeypatch, capsys) -> None:  # n
         "question": "测试问题",
         "thread_id": "research-cli",
     }
-    assert "任务 ID：research-cli（仅当前进程内有效）" in output
+    assert "任务 ID：research-cli（已持久化到 SQLite）" in output
+
+
+def test_resume_passes_thread_id_and_can_stream(monkeypatch, capsys) -> None:  # noqa: ANN001
+    state = create_initial_state("恢复问题")
+    result = ResearchResult(
+        question="恢复问题",
+        answer="恢复答案",
+        state=state,
+        thread_id="resume-cli",
+    )
+    received: dict[str, str] = {}
+
+    def fake_resume(thread_id, on_event, **kwargs):  # noqa: ANN001, ANN003, ANN202
+        received["thread_id"] = thread_id
+        on_event(ResearchEvent("run_started", "恢复研究：恢复问题"))
+        return result
+
+    monkeypatch.setattr("deepresearch.cli.stream_resume_question", fake_resume)
+
+    exit_code = main(["resume", "resume-cli", "--stream"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert received == {"thread_id": "resume-cli"}
+    assert "[开始] 恢复研究：恢复问题" in output
+    assert "恢复答案" in output
+
+
+def test_inspect_reads_sqlite_without_model(monkeypatch, capsys, tmp_path) -> None:  # noqa: ANN001
+    monkeypatch.chdir(tmp_path)
+    with open_sqlite_checkpointer() as checkpointer:
+        run_with_model(
+            "检查问题",
+            FakeMessagesListChatModel(responses=[AIMessage(content="检查答案")]),
+            checkpointer=checkpointer,
+            thread_id="inspect-cli",
+        )
+
+    exit_code = main(["inspect", "inspect-cli"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "任务 ID：inspect-cli" in output
+    assert "研究问题：检查问题" in output
+    assert "Graph 步骤：" in output
+    assert "最终报告：未生成" in output
+
+
+def test_inspect_reports_missing_thread(monkeypatch, capsys, tmp_path) -> None:  # noqa: ANN001
+    monkeypatch.chdir(tmp_path)
+
+    exit_code = main(["inspect", "missing-thread"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert "错误：找不到任务：missing-thread" in output

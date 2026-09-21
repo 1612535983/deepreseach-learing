@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from langchain.agents import create_agent
 from langchain_core.language_models import BaseChatModel
@@ -15,7 +15,12 @@ from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from deepresearch.checkpointing import (
-    get_default_in_memory_checkpointer,
+    ensure_new_thread,
+    ensure_new_thread_async,
+    get_checkpoint_state,
+    normalize_thread_id,
+    open_async_sqlite_checkpointer,
+    open_sqlite_checkpointer,
     resolve_checkpoint_run,
 )
 from deepresearch.config import Settings
@@ -143,6 +148,19 @@ def _result_from_state(
     )
 
 
+def _question_from_checkpoint(
+    checkpointer: BaseCheckpointSaver,
+    thread_id: str,
+) -> str:
+    """Load and validate the original question saved for a thread."""
+
+    state = get_checkpoint_state(checkpointer, thread_id)
+    question = state.get("research_question")
+    if not isinstance(question, str) or not question.strip():
+        raise RuntimeError(f"任务 {thread_id} 没有保存有效的研究问题。")
+    return question
+
+
 def run_with_model(
     question: str,
     model: BaseChatModel,
@@ -158,6 +176,8 @@ def run_with_model(
         raise ValueError("研究问题不能为空。")
 
     resolved_thread_id, config = resolve_checkpoint_run(checkpointer, thread_id)
+    if checkpointer is not None and resolved_thread_id is not None:
+        ensure_new_thread(checkpointer, resolved_thread_id)
     graph = build_agent(model, tools=tools, checkpointer=checkpointer)
     state = graph.invoke(create_initial_state(normalized_question), config=config)
     return _result_from_state(normalized_question, state, resolved_thread_id)
@@ -179,6 +199,8 @@ def stream_with_model(
         raise ValueError("研究问题不能为空。")
 
     resolved_thread_id, config = resolve_checkpoint_run(checkpointer, thread_id)
+    if checkpointer is not None and resolved_thread_id is not None:
+        ensure_new_thread(checkpointer, resolved_thread_id)
     graph = build_agent(model, tools=tools, checkpointer=checkpointer)
     final_state: ResearchState | None = None
     on_event(
@@ -257,6 +279,8 @@ async def astream_with_model(
         raise ValueError("研究问题不能为空。")
 
     resolved_thread_id, config = resolve_checkpoint_run(checkpointer, thread_id)
+    if checkpointer is not None and resolved_thread_id is not None:
+        await ensure_new_thread_async(checkpointer, resolved_thread_id)
     graph = build_agent(model, tools=tools, checkpointer=checkpointer)
     final_state: ResearchState | None = None
     await on_event(
@@ -319,6 +343,88 @@ async def astream_with_model(
     return result
 
 
+def resume_with_model(
+    thread_id: str,
+    model: BaseChatModel,
+    tools: Sequence[BaseTool] | None = None,
+    *,
+    checkpointer: BaseCheckpointSaver,
+) -> ResearchResult:
+    """Continue an existing graph thread from its latest saved checkpoint."""
+
+    normalized_thread_id = normalize_thread_id(thread_id)
+    question = _question_from_checkpoint(checkpointer, normalized_thread_id)
+    _, config = resolve_checkpoint_run(checkpointer, normalized_thread_id)
+    graph = build_agent(model, tools=tools, checkpointer=checkpointer)
+    state = cast(ResearchState, graph.invoke(None, config=config))
+    return _result_from_state(question, state, normalized_thread_id)
+
+
+def stream_resume_with_model(
+    thread_id: str,
+    model: BaseChatModel,
+    tools: Sequence[BaseTool] | None = None,
+    *,
+    on_event: Callable[[ResearchEvent], None],
+    checkpointer: BaseCheckpointSaver,
+) -> ResearchResult:
+    """Continue a saved graph thread while publishing synchronous events."""
+
+    normalized_thread_id = normalize_thread_id(thread_id)
+    question = _question_from_checkpoint(checkpointer, normalized_thread_id)
+    _, config = resolve_checkpoint_run(checkpointer, normalized_thread_id)
+    graph = build_agent(model, tools=tools, checkpointer=checkpointer)
+    final_state: ResearchState | None = None
+    on_event(
+        ResearchEvent(
+            "run_started",
+            f"恢复研究：{question}",
+            {
+                "question": question,
+                "thread_id": normalized_thread_id,
+                "resumed": True,
+            },
+        )
+    )
+    try:
+        for mode, data in graph.stream(
+            None,
+            config=config,
+            stream_mode=["updates", "values"],
+        ):
+            if mode == "updates":
+                for event in events_from_update(data):
+                    on_event(event)
+            elif mode == "values" and isinstance(data, dict):
+                final_state = cast(ResearchState, data)
+    except Exception as exc:
+        on_event(
+            ResearchEvent(
+                "run_failed",
+                f"研究恢复失败：{exc}",
+                {"error_type": type(exc).__name__},
+            )
+        )
+        raise
+
+    if final_state is None:
+        raise RuntimeError("Agent 恢复执行没有返回最终 State。")
+    result = _result_from_state(question, final_state, normalized_thread_id)
+    on_event(
+        ResearchEvent(
+            "run_completed",
+            "研究任务已完成",
+            {
+                "source_count": len(final_state.get("sources", [])),
+                "has_report": bool(final_state.get("final_report")),
+                "thread_id": normalized_thread_id,
+                "resumed": True,
+            },
+        )
+    )
+    return result
+
+
 def _research_tools() -> list[BaseTool]:
     """Return the complete tool set used by the real research agent."""
 
@@ -341,18 +447,23 @@ def run_question(
     """Run a real model request using explicit settings or the local .env file."""
 
     resolved_settings = settings or Settings.from_env()
-    resolved_checkpointer = (
-        checkpointer
-        if checkpointer is not None
-        else get_default_in_memory_checkpointer()
-    )
-    return run_with_model(
-        question,
-        build_model(resolved_settings),
-        tools=_research_tools(),
-        checkpointer=resolved_checkpointer,
-        thread_id=thread_id,
-    )
+    model = build_model(resolved_settings)
+    if checkpointer is not None:
+        return run_with_model(
+            question,
+            model,
+            tools=_research_tools(),
+            checkpointer=checkpointer,
+            thread_id=thread_id,
+        )
+    with open_sqlite_checkpointer() as sqlite_checkpointer:
+        return run_with_model(
+            question,
+            model,
+            tools=_research_tools(),
+            checkpointer=sqlite_checkpointer,
+            thread_id=thread_id,
+        )
 
 
 def stream_question(
@@ -366,19 +477,25 @@ def stream_question(
     """Run a real model request and synchronously publish progress events."""
 
     resolved_settings = settings or Settings.from_env()
-    resolved_checkpointer = (
-        checkpointer
-        if checkpointer is not None
-        else get_default_in_memory_checkpointer()
-    )
-    return stream_with_model(
-        question,
-        build_model(resolved_settings),
-        tools=_research_tools(),
-        on_event=on_event,
-        checkpointer=resolved_checkpointer,
-        thread_id=thread_id,
-    )
+    model = build_model(resolved_settings)
+    if checkpointer is not None:
+        return stream_with_model(
+            question,
+            model,
+            tools=_research_tools(),
+            on_event=on_event,
+            checkpointer=checkpointer,
+            thread_id=thread_id,
+        )
+    with open_sqlite_checkpointer() as sqlite_checkpointer:
+        return stream_with_model(
+            question,
+            model,
+            tools=_research_tools(),
+            on_event=on_event,
+            checkpointer=sqlite_checkpointer,
+            thread_id=thread_id,
+        )
 
 
 async def astream_question(
@@ -392,19 +509,80 @@ async def astream_question(
     """Run a real model request and asynchronously publish progress events."""
 
     resolved_settings = settings or Settings.from_env()
-    resolved_checkpointer = (
-        checkpointer
-        if checkpointer is not None
-        else get_default_in_memory_checkpointer()
-    )
-    return await astream_with_model(
-        question,
-        build_model(resolved_settings),
-        tools=_research_tools(),
-        on_event=on_event,
-        checkpointer=resolved_checkpointer,
-        thread_id=thread_id,
-    )
+    model = build_model(resolved_settings)
+    if checkpointer is not None:
+        return await astream_with_model(
+            question,
+            model,
+            tools=_research_tools(),
+            on_event=on_event,
+            checkpointer=checkpointer,
+            thread_id=thread_id,
+        )
+    async with open_async_sqlite_checkpointer() as sqlite_checkpointer:
+        return await astream_with_model(
+            question,
+            model,
+            tools=_research_tools(),
+            on_event=on_event,
+            checkpointer=sqlite_checkpointer,
+            thread_id=thread_id,
+        )
+
+
+def resume_question(
+    thread_id: str,
+    settings: Settings | None = None,
+    *,
+    checkpointer: BaseCheckpointSaver | None = None,
+) -> ResearchResult:
+    """Resume a real-model research thread from SQLite or an injected saver."""
+
+    resolved_settings = settings or Settings.from_env()
+    model = build_model(resolved_settings)
+    if checkpointer is not None:
+        return resume_with_model(
+            thread_id,
+            model,
+            tools=_research_tools(),
+            checkpointer=checkpointer,
+        )
+    with open_sqlite_checkpointer() as sqlite_checkpointer:
+        return resume_with_model(
+            thread_id,
+            model,
+            tools=_research_tools(),
+            checkpointer=sqlite_checkpointer,
+        )
+
+
+def stream_resume_question(
+    thread_id: str,
+    on_event: Callable[[ResearchEvent], None],
+    settings: Settings | None = None,
+    *,
+    checkpointer: BaseCheckpointSaver | None = None,
+) -> ResearchResult:
+    """Resume a real-model research thread and publish progress events."""
+
+    resolved_settings = settings or Settings.from_env()
+    model = build_model(resolved_settings)
+    if checkpointer is not None:
+        return stream_resume_with_model(
+            thread_id,
+            model,
+            tools=_research_tools(),
+            on_event=on_event,
+            checkpointer=checkpointer,
+        )
+    with open_sqlite_checkpointer() as sqlite_checkpointer:
+        return stream_resume_with_model(
+            thread_id,
+            model,
+            tools=_research_tools(),
+            on_event=on_event,
+            checkpointer=sqlite_checkpointer,
+        )
 
 
 def run_demo(question: str = "这个最小 Agent 的执行链是否已经跑通？") -> ResearchResult:

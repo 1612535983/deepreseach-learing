@@ -1,27 +1,59 @@
-"""Helpers for thread-scoped LangGraph checkpoint configuration."""
+"""Create persistent checkpoint savers and address research threads."""
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Iterator, Mapping
+from contextlib import asynccontextmanager, contextmanager
+from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from langchain_core.runnables import RunnableConfig
-from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.base import BaseCheckpointSaver, CheckpointTuple
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 
-_DEFAULT_IN_MEMORY_CHECKPOINTER = InMemorySaver()
+DEFAULT_CHECKPOINT_DB = Path(".deepresearch/checkpoints.sqlite")
 
 
 def create_in_memory_checkpointer() -> InMemorySaver:
-    """Create an isolated saver whose data lasts for the current process only."""
+    """Create an isolated saver for unit tests and short-lived callers."""
 
     return InMemorySaver()
 
 
-def get_default_in_memory_checkpointer() -> InMemorySaver:
-    """Return the process-scoped saver used by the default real-agent entry points."""
+def _prepare_database_path(path: str | Path) -> Path:
+    """Create the database parent directory and reject directory targets."""
 
-    return _DEFAULT_IN_MEMORY_CHECKPOINTER
+    database_path = Path(path).expanduser()
+    if database_path.exists() and database_path.is_dir():
+        raise ValueError(f"Checkpoint 数据库路径不能是目录：{database_path}")
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    return database_path
+
+
+@contextmanager
+def open_sqlite_checkpointer(
+    path: str | Path = DEFAULT_CHECKPOINT_DB,
+) -> Iterator[SqliteSaver]:
+    """Open a disk-backed saver for the duration of a synchronous graph run."""
+
+    database_path = _prepare_database_path(path)
+    with SqliteSaver.from_conn_string(str(database_path)) as checkpointer:
+        yield checkpointer
+
+
+@asynccontextmanager
+async def open_async_sqlite_checkpointer(
+    path: str | Path = DEFAULT_CHECKPOINT_DB,
+) -> AsyncIterator[AsyncSqliteSaver]:
+    """Open a disk-backed saver for the duration of an asynchronous graph run."""
+
+    database_path = _prepare_database_path(path)
+    async with AsyncSqliteSaver.from_conn_string(str(database_path)) as checkpointer:
+        yield checkpointer
 
 
 def generate_thread_id() -> str:
@@ -51,6 +83,52 @@ def build_thread_config(thread_id: str) -> RunnableConfig:
             "thread_id": normalize_thread_id(thread_id),
         }
     }
+
+
+def get_checkpoint_tuple(
+    checkpointer: BaseCheckpointSaver,
+    thread_id: str,
+) -> CheckpointTuple:
+    """Return the latest checkpoint or raise a user-facing missing-thread error."""
+
+    normalized_thread_id = normalize_thread_id(thread_id)
+    checkpoint = checkpointer.get_tuple(build_thread_config(normalized_thread_id))
+    if checkpoint is None:
+        raise ValueError(f"找不到任务：{normalized_thread_id}")
+    return checkpoint
+
+
+def get_checkpoint_state(
+    checkpointer: BaseCheckpointSaver,
+    thread_id: str,
+) -> dict[str, Any]:
+    """Read the latest State values saved for one thread."""
+
+    checkpoint = get_checkpoint_tuple(checkpointer, thread_id)
+    values = checkpoint.checkpoint.get("channel_values", {})
+    if not isinstance(values, Mapping):
+        raise RuntimeError(f"任务 {thread_id} 的 Checkpoint State 格式无效。")
+    return dict(values)
+
+
+def ensure_new_thread(
+    checkpointer: BaseCheckpointSaver,
+    thread_id: str,
+) -> None:
+    """Prevent a new run from accidentally merging into an existing thread."""
+
+    if checkpointer.get_tuple(build_thread_config(thread_id)) is not None:
+        raise ValueError(f"任务 {thread_id} 已存在，请使用 resume 命令继续。")
+
+
+async def ensure_new_thread_async(
+    checkpointer: BaseCheckpointSaver,
+    thread_id: str,
+) -> None:
+    """Asynchronously prevent reuse of an existing thread ID."""
+
+    if await checkpointer.aget_tuple(build_thread_config(thread_id)) is not None:
+        raise ValueError(f"任务 {thread_id} 已存在，请使用 resume 命令继续。")
 
 
 def resolve_checkpoint_run(
