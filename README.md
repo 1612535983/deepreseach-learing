@@ -79,6 +79,15 @@ cp .env.example .env
 uv run deepresearch run "请解释 ReAct Agent 的基本工作方式"
 ```
 
+显示由程序根据 State 计算的真实搜索记录和来源：
+
+```bash
+uv run deepresearch run "研究 LangChain Agent" --show-trace
+```
+
+`--show-trace` 中的统计不调用 LLM；它直接读取 `search_records`、`sources`
+和 `observations`，用于区分真实执行记录与模型生成的自然语言说明。
+
 `run` 模式会把 `web_search` 注册给真实模型；涉及实时信息时，模型可以主动搜索。
 `demo` 模式仍使用无工具的 Fake Model，保证在没有网络和 API Key 时也能验证基础链路。
 

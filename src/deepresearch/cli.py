@@ -6,6 +6,7 @@ import argparse
 from collections.abc import Sequence
 
 from deepresearch.agent import run_demo, run_question
+from deepresearch.reporting import format_trace
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -24,6 +25,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = subparsers.add_parser("run", help="使用 .env 中的真实模型回答问题")
     run.add_argument("question", help="要交给 Agent 的问题")
+    run.add_argument(
+        "--show-trace",
+        action="store_true",
+        help="显示由程序统计的搜索记录和来源",
+    )
     return parser
 
 
@@ -31,11 +37,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     try:
-        result = run_demo(args.question) if args.command == "demo" else run_question(args.question)
+        result = (
+            run_demo(args.question)
+            if args.command == "demo"
+            else run_question(args.question)
+        )
     except (ValueError, RuntimeError) as exc:
         print(f"错误：{exc}")
         return 1
 
     print(result.answer)
+    if getattr(args, "show_trace", False):
+        print()
+        print(format_trace(result.state))
     return 0
-
