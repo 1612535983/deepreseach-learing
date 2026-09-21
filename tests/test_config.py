@@ -1,9 +1,12 @@
 import pytest
 
+from deepresearch import config as config_module
 from deepresearch.config import Settings
 
 
 def test_settings_require_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Unit tests must not inherit a developer's real local .env file.
+    monkeypatch.setattr(config_module, "load_dotenv", lambda: False)
     monkeypatch.delenv("DEEPRESEARCH_API_KEY", raising=False)
     monkeypatch.setenv("DEEPRESEARCH_BASE_URL", "https://example.com/v1")
 
@@ -21,4 +24,3 @@ def test_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.api_key == "test-key"
     assert settings.model == "test-model"
     assert settings.base_url == "https://example.com/v1"
-
