@@ -104,3 +104,57 @@ def test_agent_completes_tool_call_loop(monkeypatch) -> None:  # noqa: ANN001
 
     assert FakeDDGS.queries == ["latest agent news"]
     assert "https://example.com/article" in result.answer
+    assert result.state["search_records"] == [
+        {
+            "query": "latest agent news",
+            "success": True,
+            "result_count": 1,
+            "error": None,
+        }
+    ]
+    assert result.state["sources"][0]["url"] == "https://example.com/article"
+    assert result.state["observations"][0]["content"] == "Example summary"
+
+
+def test_repeated_searches_append_records_and_deduplicate_sources(
+    monkeypatch,
+) -> None:  # noqa: ANN001
+    FakeDDGS.queries.clear()
+    monkeypatch.setattr(search_module, "DDGS", FakeDDGS)
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "web_search",
+                        "args": {"query": "first query", "max_results": 2},
+                        "id": "search-call-1",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "web_search",
+                        "args": {"query": "second query", "max_results": 2},
+                        "id": "search-call-2",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(content="两轮搜索完成"),
+        ]
+    )
+
+    result = run_with_model("执行两轮搜索", model, tools=[web_search_tool])
+
+    assert FakeDDGS.queries == ["first query", "second query"]
+    assert [item["query"] for item in result.state["search_records"]] == [
+        "first query",
+        "second query",
+    ]
+    assert len(result.state["sources"]) == 1
+    assert len(result.state["observations"]) == 2

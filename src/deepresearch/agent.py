@@ -19,6 +19,7 @@ from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 
 from deepresearch.config import Settings
+from deepresearch.middlewares import EvidenceMiddleware
 from deepresearch.state import ResearchState, create_initial_state
 from deepresearch.tools import web_search_tool
 
@@ -61,9 +62,11 @@ def build_agent(
     """Compile the model and prompt into LangChain's ReAct agent graph."""
 
     resolved_tools = list(tools or [])
+    middlewares = [EvidenceMiddleware()] if resolved_tools else []
     return create_agent(
         model=model,
         tools=resolved_tools,
+        middleware=middlewares,
         system_prompt=SEARCH_SYSTEM_PROMPT if resolved_tools else BASE_SYSTEM_PROMPT,
         state_schema=ResearchState,
     )
