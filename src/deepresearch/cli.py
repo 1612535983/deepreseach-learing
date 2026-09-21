@@ -6,7 +6,7 @@ import argparse
 from collections.abc import Sequence
 
 from deepresearch.agent import run_demo, run_question
-from deepresearch.reporting import format_trace
+from deepresearch.reporting import format_trace, save_markdown_report
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -30,6 +30,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="显示由程序统计的搜索、网页读取和来源记录",
     )
+    run.add_argument(
+        "--output",
+        metavar="REPORT.md",
+        help="把 final_report 保存为新的 Markdown 文件（不会覆盖已有文件）",
+    )
     return parser
 
 
@@ -42,11 +47,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.command == "demo"
             else run_question(args.question)
         )
+        output_path = None
+        if args.command == "run" and args.output:
+            output_path = save_markdown_report(result.state, args.output)
     except (ValueError, RuntimeError) as exc:
         print(f"错误：{exc}")
         return 1
 
     print(result.answer)
+    if output_path is not None:
+        print()
+        print(f"报告已保存：{output_path}")
     if getattr(args, "show_trace", False):
         print()
         print(format_trace(result.state))

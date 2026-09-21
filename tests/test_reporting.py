@@ -1,6 +1,7 @@
+import pytest
 from langchain_core.messages import HumanMessage
 
-from deepresearch.reporting import calculate_stats, format_trace
+from deepresearch.reporting import calculate_stats, format_trace, save_markdown_report
 from deepresearch.state import ResearchState
 
 
@@ -108,3 +109,27 @@ def test_format_trace_includes_queries_errors_and_sources() -> None:
     assert "计划步骤：step-1" in trace
     assert "反思次数：1" in trace
     assert "step-2 尚未完成：核验资料" in trace
+    assert "正式报告：未生成" in trace
+
+
+def test_save_markdown_report_writes_final_report(tmp_path) -> None:  # noqa: ANN001
+    state = make_state()
+    state["final_report"] = "# 测试报告\n\n正文"
+    output_path = tmp_path / "reports" / "result.md"
+
+    saved_path = save_markdown_report(state, output_path)
+
+    assert saved_path == output_path
+    assert output_path.read_text(encoding="utf-8") == "# 测试报告\n\n正文\n"
+
+
+def test_save_markdown_report_does_not_overwrite_existing_file(tmp_path) -> None:  # noqa: ANN001
+    state = make_state()
+    state["final_report"] = "# 新报告"
+    output_path = tmp_path / "result.md"
+    output_path.write_text("原有内容", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="不会覆盖"):
+        save_markdown_report(state, output_path)
+
+    assert output_path.read_text(encoding="utf-8") == "原有内容"

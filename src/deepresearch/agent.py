@@ -24,6 +24,7 @@ from deepresearch.tools import (
     read_page_tool,
     update_plan_step_tool,
     web_search_tool,
+    write_final_report_tool,
     write_research_plan_tool,
 )
 
@@ -39,7 +40,8 @@ SEARCH_SYSTEM_PROMPT = """你是一个严谨的研究助手，可以使用 web_s
 调用 update_plan_step 更新状态，再继续下一步。
 涉及实时信息、具体事实或用户要求来源时，应先搜索再回答。使用简洁、具体的搜索关键词；
 对关键结论应优先读取 2 到 3 个最相关、尽量权威的来源，而不是只依赖搜索摘要。
-不得编造搜索结果或网页内容。最终回答要列出实际使用过的来源标题和 URL；如果工具失败，请明确说明。
+不得编造搜索结果或网页内容。完成计划和证据收集后，必须调用 write_final_report，
+提交 Markdown 报告以及报告中实际引用的来源 URL；如果工具失败，请明确说明。
 """
 
 
@@ -76,7 +78,13 @@ def build_agent(
         middlewares.append(PlanContextMiddleware())
     if {"web_search", "read_page"}.intersection(tool_names):
         middlewares.append(EvidenceMiddleware())
-    if {"write_research_plan", "web_search", "read_page"}.issubset(tool_names):
+    research_tool_names = {
+        "write_research_plan",
+        "web_search",
+        "read_page",
+        "write_final_report",
+    }
+    if research_tool_names.issubset(tool_names):
         middlewares.append(ReflectionMiddleware())
     return create_agent(
         model=model,
@@ -118,7 +126,7 @@ def run_with_model(
 
     return ResearchResult(
         question=normalized_question,
-        answer=_message_text(final_message),
+        answer=state.get("final_report") or _message_text(final_message),
         state=state,
     )
 
@@ -135,6 +143,7 @@ def run_question(question: str, settings: Settings | None = None) -> ResearchRes
             update_plan_step_tool,
             web_search_tool,
             read_page_tool,
+            write_final_report_tool,
         ],
     )
 

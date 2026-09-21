@@ -2,7 +2,7 @@
 
 这个项目不是直接复制 Poirot，而是沿着 Poirot 的核心执行链逐层重建：先让最小 Agent 跑通，再按 Git 阶段加入 Tool、Middleware、State、Skill 和其他基础设施。
 
-当前版本是 **阶段 6A：带受限反思闭环的研究 Agent**：
+当前版本是 **阶段 6B：能够生成并导出 Markdown 报告的研究 Agent**：
 
 ```text
 命令行问题
@@ -44,23 +44,31 @@ PlanContextMiddleware 选择性注入计划进度
                                 ↓
                          update_plan_step 推进计划
     ↓
-模型准备输出最终回答
+模型调用 write_final_report
+    ↓
+校验研究进度和引用 URL
+    ↓
+Markdown 报告写入 State.final_report
+    ↓
+模型准备结束
     ↓
 ReflectionMiddleware 程序化检查
-    ├── 计划和证据足够 → 允许结束
+    ├── 计划、证据、报告齐全 → 允许结束
     └── 存在缺口 → 写入 research_gaps → 回到模型（最多 2 次）
                                                     ↓
                                       超过上限后保留缺口并允许结束
     ↓
 ResearchResult(question, answer, state)
+    ↓ 可选 --output
+save_markdown_report() 创建 .md 文件
 ```
 
 ## 输入和输出
 
 - 输入：一个非空的自然语言问题，例如“什么是 ReAct？”
 - 输出：`ResearchResult`，其中包含原始问题、模型最终回答和完整 `ResearchState`。
-- 当前解决的问题：先创建结构化计划，按步骤搜索、读取网页，把证据关联到当前步骤，并在模型准备结束时检查研究缺口。
-- 当前不解决的问题：判断证据内容在语义上是否可靠、正式报告生成、长期记忆、Skill 和多 Agent。
+- 当前解决的问题：创建计划、搜索和读取网页、记录证据、检查研究缺口、校验报告引用，并输出 Markdown 研究报告。
+- 当前不解决的问题：判断证据内容在语义上是否可靠、长期记忆、Skill 和多 Agent。
 
 ## 环境准备
 
@@ -108,11 +116,24 @@ uv run deepresearch run "请解释 ReAct Agent 的基本工作方式"
 uv run deepresearch run "研究 LangChain Agent" --show-trace
 ```
 
+把最终报告保存为新的 Markdown 文件：
+
+```bash
+uv run deepresearch run "研究 LangChain Agent" \
+  --output reports/langchain-agent.md
+```
+
+`--output` 只负责把 `State.final_report` 写入磁盘，不会调用 LLM，也不会覆盖已有文件。
+LLM 负责生成 Markdown 内容；`write_final_report` Tool 负责校验引用并更新 State；
+`save_markdown_report()` 才是真正创建 `.md` 文件的代码。
+
 `--show-trace` 中的统计不调用 LLM；它直接读取 `search_records`、`page_records`、
 `sources` 和 `observations`，用于区分真实执行记录与模型生成的自然语言说明。
 
 `run` 模式会把 `web_search` 和 `read_page` 注册给真实模型；模型可以先搜索，
 再选择重要来源读取正文。`write_research_plan` 和 `update_plan_step` 负责创建并推进计划。
+研究完成后，模型必须调用 `write_final_report`，并提交 Markdown 内容和实际引用的 URL。
+Tool 会确认研究已经完成、至少引用两个收集过的来源，而且声明的 URL 确实出现在报告正文中。
 `PlanContextMiddleware` 每轮只向模型展示计划进度和聚合计数，不会把完整 State 全量注入。
 `ReflectionMiddleware` 在模型不再调用 Tool、准备结束时读取 State，检查计划是否完成、
 来源和 Observation 是否达到最小数量、是否成功读取过网页正文。检查不调用额外 LLM；
@@ -134,6 +155,7 @@ uv run deepresearch run "研究 LangChain Agent" --show-trace
 - **上下文投影**：从完整 State 中筛选当前模型真正需要的字段；本项目只投影计划和聚合进度，不投影全部内部数据。
 - **反思（Reflection）**：模型准备结束时进行质量检查。当前版本是可测试的程序规则，不是再调用一次 LLM 自我评价。
 - **回跳（jump_to）**：Middleware 返回的图路由指令。`jump_to="model"` 表示当前不结束，重新执行模型节点。
+- **Markdown**：一种纯文本格式。LLM 生成 Markdown 字符串，Python 再把字符串写入 `.md` 文件。
 
 ## 分阶段复现路线
 
@@ -145,8 +167,8 @@ uv run deepresearch run "研究 LangChain Agent" --show-trace
 4. **阶段 3（已完成）— 第一个 Middleware**：由 Evidence Middleware 把工具结果整理为证据，并提供真实执行 Trace。
 5. **阶段 4（已完成）— 网页正文读取**：增加安全 URL 校验和 `read_page`，把关键网页正文沉淀为证据。
 6. **阶段 5（已完成）— 结构化研究计划**：模型创建和推进 Plan，Middleware 选择性注入进度，证据关联步骤。
-7. **阶段 6A（当前）— 受限研究反思**：程序检查计划和证据，通过 `jump_to` 最多继续研究 2 次。
-8. **阶段 6B — 最终报告**：根据 State 中的证据生成有引用的正式报告，并保存到 `final_report`。
+7. **阶段 6A（已完成）— 受限研究反思**：程序检查计划和证据，通过 `jump_to` 最多继续研究 2 次。
+8. **阶段 6B（当前）— 最终报告**：校验报告引用，保存到 `final_report`，并由 CLI 导出 `.md` 文件。
 9. **阶段 7 — Skill**：把“如何检索、如何核验来源、如何写报告”做成可选择和注入的过程知识。
 10. **阶段 8 — 工程能力**：持久化 checkpointer、流式输出、日志、错误恢复和测试评估。
 11. **阶段 9 — 高级能力**：MCP、记忆、Sandbox、多 Agent；这些不要提前加入最小主链。
@@ -180,9 +202,11 @@ git commit -m "feat: add web search tool"
 | `src/deepresearch/tools/web_search.py` | `agents/agent_tools/builtin/ddg_search.py` | 执行网页搜索 |
 | `src/deepresearch/tools/read_page.py` | 网页读取类 Tool | 安全下载并提取网页正文 |
 | `src/deepresearch/tools/research_plan.py` | Todo/计划类状态 Tool | 创建计划并推进步骤状态 |
+| `src/deepresearch/tools/final_report.py` | 最终产物 Tool | 校验报告与来源，并把 Markdown 保存到 State |
 | `src/deepresearch/middlewares/evidence.py` | `agents/middlewares/evidence_middleware.py` | 把搜索和正文结果沉淀为结构化证据 |
 | `src/deepresearch/middlewares/plan_context.py` | 计划上下文 Middleware | 选择性向模型暴露计划进度 |
 | `src/deepresearch/middlewares/reflection.py` | 反思/质量控制 Middleware | 在结束前检查缺口，并有限次回到模型 |
+| `src/deepresearch/reporting.py` | 输出层 | 显示 Trace，并把 `final_report` 写成 `.md` 文件 |
 | `build_agent()` | `agents/leader/factory.py` | 编译 Agent Graph |
 | `run_with_model()` | `agents/leader/agent.py` | 执行 Graph 并整理输出 |
 | `ResearchResult` | `AgentRunResult` | 稳定的输出边界 |

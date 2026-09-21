@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from deepresearch.state import ResearchState
 
@@ -49,6 +50,33 @@ def calculate_stats(state: ResearchState) -> ResearchStats:
             not record["success"] for record in state.get("page_records", [])
         ),
     )
+
+
+def save_markdown_report(
+    state: ResearchState,
+    output_path: str | Path,
+) -> Path:
+    """Write ``final_report`` to a new Markdown file and return its path."""
+
+    report = state.get("final_report")
+    if not report:
+        raise ValueError("State 中没有可以保存的 final_report。")
+
+    path = Path(output_path)
+    if path.suffix.lower() != ".md":
+        raise ValueError("报告输出路径必须以 .md 结尾。")
+
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("x", encoding="utf-8") as output_file:
+            output_file.write(report)
+            if not report.endswith("\n"):
+                output_file.write("\n")
+    except FileExistsError as exc:
+        raise ValueError(f"报告文件已存在，不会覆盖：{path}") from exc
+    except OSError as exc:
+        raise ValueError(f"无法写入报告文件 {path}：{exc}") from exc
+    return path
 
 
 def format_trace(state: ResearchState) -> str:
@@ -100,6 +128,7 @@ def format_trace(state: ResearchState) -> str:
             f"网页读取次数：{stats.total_page_reads}",
             f"网页读取成功：{stats.successful_page_reads}",
             f"网页读取失败：{stats.failed_page_reads}",
+            f'正式报告：{"已生成" if state.get("final_report") else "未生成"}',
             "",
             "搜索记录：",
         ]

@@ -10,7 +10,12 @@ from deepresearch.middlewares.reflection import (
     assess_research,
 )
 from deepresearch.state import ResearchState, create_initial_state
-from deepresearch.tools import read_page_tool, web_search_tool, write_research_plan_tool
+from deepresearch.tools import (
+    read_page_tool,
+    web_search_tool,
+    write_final_report_tool,
+    write_research_plan_tool,
+)
 
 
 class CountingToolModel(FakeMessagesListChatModel):
@@ -61,6 +66,7 @@ def make_complete_state() -> ResearchState:
         {"content": "A", "source_url": "https://a.example", "query": "query"},
         {"content": "B", "source_url": "https://b.example", "query": "query"},
     ]
+    state["final_report"] = "# Final report"
     return state
 
 
@@ -73,6 +79,7 @@ def test_assess_research_reports_structured_gaps() -> None:
     assert any("去重来源不足" in gap for gap in gaps)
     assert any("网页正文读取不足" in gap for gap in gaps)
     assert any("证据观察不足" in gap for gap in gaps)
+    assert "尚未生成正式研究报告。" in gaps
 
 
 def test_assess_research_accepts_completed_plan_and_enough_evidence() -> None:
@@ -113,7 +120,12 @@ def test_agent_reflects_twice_then_stops() -> None:
     result = run_with_model(
         "研究问题",
         model,
-        tools=[write_research_plan_tool, web_search_tool, read_page_tool],
+        tools=[
+            write_research_plan_tool,
+            web_search_tool,
+            read_page_tool,
+            write_final_report_tool,
+        ],
     )
 
     assert result.answer == "达到上限后的最终回答"

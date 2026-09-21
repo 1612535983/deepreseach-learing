@@ -48,6 +48,7 @@ def format_plan_context(state: ResearchState) -> str:
             f'- 网页读取次数：{len(state.get("page_records", []))}',
             f'- 去重来源数：{len(state.get("sources", []))}',
             f'- Observation 数：{len(state.get("observations", []))}',
+            f'- 正式报告：{"已生成" if state.get("final_report") else "未生成"}',
             "完成当前步骤后调用 update_plan_step，再继续下一步。",
             "</research_plan>",
         ]
