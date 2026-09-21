@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from deepresearch.events import ResearchEvent
 from deepresearch.state import ResearchState
 
 
@@ -77,6 +78,32 @@ def save_markdown_report(
     except OSError as exc:
         raise ValueError(f"无法写入报告文件 {path}：{exc}") from exc
     return path
+
+
+def format_research_event(event: ResearchEvent) -> str:
+    """Render one stable progress event without exposing raw State or page text."""
+
+    labels = {
+        "run_started": "开始",
+        "tool_requested": "工具",
+        "tool_completed": "工具",
+        "plan_updated": "计划",
+        "search_completed": "搜索",
+        "page_read_completed": "读取",
+        "reflection": "反思",
+        "report_created": "报告",
+        "run_completed": "完成",
+        "run_failed": "失败",
+    }
+    lines = [f"[{labels[event.event_type]}] {event.message}"]
+    if event.event_type == "reflection":
+        gaps = event.data.get("gaps")
+        if isinstance(gaps, list):
+            lines.extend(f"  - {gap}" for gap in gaps)
+    error = event.data.get("error")
+    if error:
+        lines.append(f"  错误：{error}")
+    return "\n".join(lines)
 
 
 def format_trace(state: ResearchState) -> str:

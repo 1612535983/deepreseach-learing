@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -14,6 +14,7 @@ from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 
 from deepresearch.config import Settings
+from deepresearch.events import ResearchEvent, events_from_update
 from deepresearch.middlewares import (
     EvidenceMiddleware,
     PlanContextMiddleware,
@@ -116,6 +117,19 @@ def _message_text(message: AIMessage) -> str:
     return str(content)
 
 
+def _result_from_state(question: str, state: ResearchState) -> ResearchResult:
+    """Build the public result shared by invoke and stream execution paths."""
+
+    final_message = state["messages"][-1]
+    if not isinstance(final_message, AIMessage):
+        raise RuntimeError("Agent 没有返回 AIMessage。")
+    return ResearchResult(
+        question=question,
+        answer=state.get("final_report") or _message_text(final_message),
+        state=state,
+    )
+
+
 def run_with_model(
     question: str,
     model: BaseChatModel,
@@ -129,15 +143,135 @@ def run_with_model(
 
     graph = build_agent(model, tools=tools)
     state = graph.invoke(create_initial_state(normalized_question))
-    final_message = state["messages"][-1]
-    if not isinstance(final_message, AIMessage):
-        raise RuntimeError("Agent 没有返回 AIMessage。")
+    return _result_from_state(normalized_question, state)
 
-    return ResearchResult(
-        question=normalized_question,
-        answer=state.get("final_report") or _message_text(final_message),
-        state=state,
+
+def stream_with_model(
+    question: str,
+    model: BaseChatModel,
+    tools: Sequence[BaseTool] | None = None,
+    *,
+    on_event: Callable[[ResearchEvent], None],
+) -> ResearchResult:
+    """Run the graph once while synchronously delivering progress events."""
+
+    normalized_question = question.strip()
+    if not normalized_question:
+        raise ValueError("研究问题不能为空。")
+
+    graph = build_agent(model, tools=tools)
+    final_state: ResearchState | None = None
+    on_event(
+        ResearchEvent(
+            "run_started",
+            f"研究开始：{normalized_question}",
+            {"question": normalized_question},
+        )
     )
+    try:
+        for mode, data in graph.stream(
+            create_initial_state(normalized_question),
+            stream_mode=["updates", "values"],
+        ):
+            if mode == "updates":
+                for event in events_from_update(data):
+                    on_event(event)
+            elif mode == "values" and isinstance(data, dict):
+                final_state = data
+    except Exception as exc:
+        on_event(
+            ResearchEvent(
+                "run_failed",
+                f"研究运行失败：{exc}",
+                {"error_type": type(exc).__name__},
+            )
+        )
+        raise
+
+    if final_state is None:
+        raise RuntimeError("Agent 流式执行没有返回最终 State。")
+    result = _result_from_state(normalized_question, final_state)
+    on_event(
+        ResearchEvent(
+            "run_completed",
+            "研究任务已完成",
+            {
+                "source_count": len(final_state.get("sources", [])),
+                "has_report": bool(final_state.get("final_report")),
+            },
+        )
+    )
+    return result
+
+
+async def astream_with_model(
+    question: str,
+    model: BaseChatModel,
+    tools: Sequence[BaseTool] | None = None,
+    *,
+    on_event: Callable[[ResearchEvent], Awaitable[None]],
+) -> ResearchResult:
+    """Run the graph once while asynchronously delivering progress events."""
+
+    normalized_question = question.strip()
+    if not normalized_question:
+        raise ValueError("研究问题不能为空。")
+
+    graph = build_agent(model, tools=tools)
+    final_state: ResearchState | None = None
+    await on_event(
+        ResearchEvent(
+            "run_started",
+            f"研究开始：{normalized_question}",
+            {"question": normalized_question},
+        )
+    )
+    try:
+        async for mode, data in graph.astream(
+            create_initial_state(normalized_question),
+            stream_mode=["updates", "values"],
+        ):
+            if mode == "updates":
+                for event in events_from_update(data):
+                    await on_event(event)
+            elif mode == "values" and isinstance(data, dict):
+                final_state = data
+    except Exception as exc:
+        await on_event(
+            ResearchEvent(
+                "run_failed",
+                f"研究运行失败：{exc}",
+                {"error_type": type(exc).__name__},
+            )
+        )
+        raise
+
+    if final_state is None:
+        raise RuntimeError("Agent 流式执行没有返回最终 State。")
+    result = _result_from_state(normalized_question, final_state)
+    await on_event(
+        ResearchEvent(
+            "run_completed",
+            "研究任务已完成",
+            {
+                "source_count": len(final_state.get("sources", [])),
+                "has_report": bool(final_state.get("final_report")),
+            },
+        )
+    )
+    return result
+
+
+def _research_tools() -> list[BaseTool]:
+    """Return the complete tool set used by the real research agent."""
+
+    return [
+        write_research_plan_tool,
+        update_plan_step_tool,
+        web_search_tool,
+        read_page_tool,
+        write_final_report_tool,
+    ]
 
 
 def run_question(question: str, settings: Settings | None = None) -> ResearchResult:
@@ -147,13 +281,39 @@ def run_question(question: str, settings: Settings | None = None) -> ResearchRes
     return run_with_model(
         question,
         build_model(resolved_settings),
-        tools=[
-            write_research_plan_tool,
-            update_plan_step_tool,
-            web_search_tool,
-            read_page_tool,
-            write_final_report_tool,
-        ],
+        tools=_research_tools(),
+    )
+
+
+def stream_question(
+    question: str,
+    on_event: Callable[[ResearchEvent], None],
+    settings: Settings | None = None,
+) -> ResearchResult:
+    """Run a real model request and synchronously publish progress events."""
+
+    resolved_settings = settings or Settings.from_env()
+    return stream_with_model(
+        question,
+        build_model(resolved_settings),
+        tools=_research_tools(),
+        on_event=on_event,
+    )
+
+
+async def astream_question(
+    question: str,
+    on_event: Callable[[ResearchEvent], Awaitable[None]],
+    settings: Settings | None = None,
+) -> ResearchResult:
+    """Run a real model request and asynchronously publish progress events."""
+
+    resolved_settings = settings or Settings.from_env()
+    return await astream_with_model(
+        question,
+        build_model(resolved_settings),
+        tools=_research_tools(),
+        on_event=on_event,
     )
 
 

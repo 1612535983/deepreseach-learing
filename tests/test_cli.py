@@ -1,5 +1,6 @@
 from deepresearch.agent import ResearchResult
 from deepresearch.cli import main
+from deepresearch.events import ResearchEvent
 from deepresearch.state import create_initial_state
 
 
@@ -42,3 +43,30 @@ def test_run_can_save_final_report(monkeypatch, capsys, tmp_path) -> None:  # no
     assert exit_code == 0
     assert report_path.read_text(encoding="utf-8") == "# 最终研究报告\n\n报告正文\n"
     assert f"报告已保存：{report_path}" in output
+
+
+def test_run_can_display_stream_events(monkeypatch, capsys) -> None:  # noqa: ANN001
+    state = create_initial_state("测试问题")
+    result = ResearchResult(question="测试问题", answer="最终答案", state=state)
+
+    def fake_stream(question, on_event):  # noqa: ANN001, ANN202
+        on_event(ResearchEvent("run_started", f"研究开始：{question}"))
+        on_event(
+            ResearchEvent(
+                "search_completed",
+                "搜索完成：test query，返回 2 个结果",
+            )
+        )
+        on_event(ResearchEvent("run_completed", "研究任务已完成"))
+        return result
+
+    monkeypatch.setattr("deepresearch.cli.stream_question", fake_stream)
+
+    exit_code = main(["run", "测试问题", "--stream"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "[开始] 研究开始：测试问题" in output
+    assert "[搜索] 搜索完成：test query，返回 2 个结果" in output
+    assert "[完成] 研究任务已完成" in output
+    assert "最终答案" in output

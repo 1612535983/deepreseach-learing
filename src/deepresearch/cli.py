@@ -5,8 +5,17 @@ from __future__ import annotations
 import argparse
 from collections.abc import Sequence
 
-from deepresearch.agent import run_demo, run_question
-from deepresearch.reporting import format_trace, save_markdown_report
+from deepresearch.agent import run_demo, run_question, stream_question
+from deepresearch.events import ResearchEvent
+from deepresearch.reporting import (
+    format_research_event,
+    format_trace,
+    save_markdown_report,
+)
+
+
+def _print_event(event: ResearchEvent) -> None:
+    print(format_research_event(event), flush=True)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -35,6 +44,11 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="REPORT.md",
         help="把 final_report 保存为新的 Markdown 文件（不会覆盖已有文件）",
     )
+    run.add_argument(
+        "--stream",
+        action="store_true",
+        help="实时显示计划、Tool、证据和反思进度",
+    )
     return parser
 
 
@@ -42,11 +56,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     try:
-        result = (
-            run_demo(args.question)
-            if args.command == "demo"
-            else run_question(args.question)
-        )
+        if args.command == "demo":
+            result = run_demo(args.question)
+        elif args.stream:
+            result = stream_question(args.question, _print_event)
+        else:
+            result = run_question(args.question)
         output_path = None
         if args.command == "run" and args.output:
             output_path = save_markdown_report(result.state, args.output)
@@ -54,6 +69,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"错误：{exc}")
         return 1
 
+    if getattr(args, "stream", False):
+        print()
     print(result.answer)
     if output_path is not None:
         print()
