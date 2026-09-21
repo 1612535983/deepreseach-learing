@@ -1,0 +1,30 @@
+[project]
+name = "deepresearch-demo"
+version = "0.1.0"
+description = "A minimal deep-research agent rebuilt from Poirot's core execution path"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "langchain>=1.2,<2",
+    "langchain-openai>=1.1,<2",
+    "python-dotenv>=1.0,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<10",
+]
+
+[project.scripts]
+deepresearch = "deepresearch.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
