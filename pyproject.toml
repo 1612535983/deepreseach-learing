@@ -5,6 +5,7 @@ description = "A minimal deep-research agent rebuilt from Poirot's core executio
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "ddgs>=9,<10",
     "langchain>=1.2,<2",
     "langchain-openai>=1.1,<2",
     "python-dotenv>=1.0,<2",
@@ -27,4 +28,3 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-

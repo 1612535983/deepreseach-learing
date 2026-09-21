@@ -7,6 +7,7 @@ understand and gives later features a stable baseline.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -14,14 +15,21 @@ from langchain.agents import create_agent
 from langchain_core.language_models import BaseChatModel
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage
+from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 
 from deepresearch.config import Settings
+from deepresearch.tools import web_search_tool
 
 
-SYSTEM_PROMPT = """你是一个严谨的研究助手。
-当前是最小可运行版本，还没有搜索工具，所以必须明确区分已知事实和不确定信息。
-请直接回答问题；如果问题需要实时资料，请说明当前版本需要接入搜索工具后才能可靠回答。
+BASE_SYSTEM_PROMPT = """你是一个严谨的研究助手。
+当前运行模式没有搜索工具。请明确区分已知事实和不确定信息；如果问题需要实时资料，
+请说明当前模式无法可靠回答。
+"""
+
+SEARCH_SYSTEM_PROMPT = """你是一个严谨的研究助手，可以使用 web_search 搜索公开网页。
+涉及实时信息、具体事实或用户要求来源时，应先搜索再回答。使用简洁、具体的搜索关键词；
+不得编造搜索结果。最终回答要列出实际使用过的来源标题和 URL；如果搜索失败，请明确说明。
 """
 
 
@@ -44,13 +52,17 @@ def build_model(settings: Settings) -> BaseChatModel:
     )
 
 
-def build_agent(model: BaseChatModel) -> Any:
+def build_agent(
+    model: BaseChatModel,
+    tools: Sequence[BaseTool] | None = None,
+) -> Any:
     """Compile the model and prompt into LangChain's ReAct agent graph."""
 
+    resolved_tools = list(tools or [])
     return create_agent(
         model=model,
-        tools=[],
-        system_prompt=SYSTEM_PROMPT,
+        tools=resolved_tools,
+        system_prompt=SEARCH_SYSTEM_PROMPT if resolved_tools else BASE_SYSTEM_PROMPT,
     )
 
 
@@ -66,14 +78,18 @@ def _message_text(message: AIMessage) -> str:
     return str(content)
 
 
-def run_with_model(question: str, model: BaseChatModel) -> ResearchResult:
+def run_with_model(
+    question: str,
+    model: BaseChatModel,
+    tools: Sequence[BaseTool] | None = None,
+) -> ResearchResult:
     """Run one question through a supplied model and return the final answer."""
 
     normalized_question = question.strip()
     if not normalized_question:
         raise ValueError("研究问题不能为空。")
 
-    graph = build_agent(model)
+    graph = build_agent(model, tools=tools)
     state = graph.invoke(
         {"messages": [{"role": "user", "content": normalized_question}]}
     )
@@ -91,7 +107,11 @@ def run_question(question: str, settings: Settings | None = None) -> ResearchRes
     """Run a real model request using explicit settings or the local .env file."""
 
     resolved_settings = settings or Settings.from_env()
-    return run_with_model(question, build_model(resolved_settings))
+    return run_with_model(
+        question,
+        build_model(resolved_settings),
+        tools=[web_search_tool],
+    )
 
 
 def run_demo(question: str = "这个最小 Agent 的执行链是否已经跑通？") -> ResearchResult:
@@ -108,4 +128,3 @@ def run_demo(question: str = "这个最小 Agent 的执行链是否已经跑通�
         ]
     )
     return run_with_model(question, fake_model)
-

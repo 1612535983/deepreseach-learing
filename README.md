@@ -2,7 +2,7 @@
 
 这个项目不是直接复制 Poirot，而是沿着 Poirot 的核心执行链逐层重建：先让最小 Agent 跑通，再按 Git 阶段加入 Tool、Middleware、State、Skill 和其他基础设施。
 
-当前版本是 **阶段 0：最小 Agent**。它只包含：
+当前版本是 **阶段 1：带一个搜索 Tool 的最小 ReAct Agent**：
 
 ```text
 命令行问题
@@ -13,7 +13,9 @@ ChatOpenAI（兼容 OpenAI 协议的模型）
     ↓
 create_agent() 编译 Agent Graph
     ↓
-graph.invoke()
+模型判断是否调用 web_search
+    ├── 不调用 → 直接回答
+    └── 调用 → DuckDuckGo 搜索 → ToolMessage → 再次调用模型
     ↓
 ResearchResult(question, answer)
 ```
@@ -22,8 +24,8 @@ ResearchResult(question, answer)
 
 - 输入：一个非空的自然语言问题，例如“什么是 ReAct？”
 - 输出：`ResearchResult`，其中 `question` 是原始问题，`answer` 是模型最终回答。
-- 当前解决的问题：验证 CLI、配置、模型、Agent Graph 和结果封装这一条最小主链。
-- 当前不解决的问题：联网搜索、引用核验、研究规划、长程状态、Skill、记忆和多 Agent。
+- 当前解决的问题：验证 CLI、模型、Agent Graph、网页搜索 Tool 和结果封装这一条最小 ReAct 主链。
+- 当前不解决的问题：网页正文读取、严格引用核验、研究规划、长程状态、Skill、记忆和多 Agent。
 
 ## 环境准备
 
@@ -65,14 +67,17 @@ cp .env.example .env
 uv run deepresearch run "请解释 ReAct Agent 的基本工作方式"
 ```
 
+`run` 模式会把 `web_search` 注册给真实模型；涉及实时信息时，模型可以主动搜索。
+`demo` 模式仍使用无工具的 Fake Model，保证在没有网络和 API Key 时也能验证基础链路。
+
 `.env` 已被 `.gitignore` 排除，真实 API Key 不会进入 Git。
 
 ## 名词解释
 
 - **LLM / 大模型**：接收消息并生成回答的模型，本阶段使用 `ChatOpenAI` 适配兼容 OpenAI 协议的服务。
-- **Agent**：让模型在一个执行框架中运行的程序。未来它可以判断何时调用工具、何时继续研究、何时结束。
+- **Agent**：让模型在一个执行框架中运行的程序；当前模型可以判断是直接回答，还是先调用搜索工具。
 - **Graph**：Agent 的执行流程图。`create_agent()` 会为我们生成最基本的模型调用循环。
-- **ReAct**：Reason + Act，即“思考下一步并执行动作”。没有 Tool 时，本阶段只走一次模型回答；加入 Tool 后才形成真正有动作的循环。
+- **ReAct**：Reason + Act，即“判断下一步并执行动作”。当前的动作是 `web_search`，工具结果会返回模型形成下一轮判断。
 - **Tool**：可执行能力，例如网页搜索、网页读取和文件操作。
 - **Skill**：告诉 Agent“应该怎样完成某类任务”的过程知识，通常是提示词，不等于 Tool。
 - **Middleware**：插在 Agent 生命周期中的横切逻辑，例如模型调用前注入 Skill、工具调用后收集证据。
@@ -82,8 +87,8 @@ uv run deepresearch run "请解释 ReAct Agent 的基本工作方式"
 
 每个阶段都应该满足“代码可运行、测试通过、单独 Git 提交”后，再进入下一阶段。
 
-1. **阶段 0（当前）— 最小 Agent**：CLI → 模型 → `create_agent` → 回答。
-2. **阶段 1 — 第一个 Tool**：增加 `web_search`，让模型产生 tool call，并把搜索结果返回模型。
+1. **阶段 0（已完成）— 最小 Agent**：CLI → 模型 → `create_agent` → 回答。
+2. **阶段 1（当前）— 第一个 Tool**：增加 `web_search`，让模型产生 tool call，并把搜索结果返回模型。
 3. **阶段 2 — 研究 State**：加入 `sources`、`observations`、`research_question` 和 reducer。
 4. **阶段 3 — 第一个 Middleware**：在工具调用后把结果整理为证据；先只做 Evidence Middleware。
 5. **阶段 4 — 研究闭环**：加入 Todo/Plan、证据充分性检查和最终报告生成。
@@ -93,25 +98,19 @@ uv run deepresearch run "请解释 ReAct Agent 的基本工作方式"
 
 ## Git 管理建议
 
-推荐让 `main` 始终保持可运行，每一层能力使用一条短分支：
+当前项目直接在 `main` 上按阶段开发；每次提交前必须先跑完测试，让 `main` 始终保持可运行：
 
 ```text
-main
- ├── feat/web-search-tool
- ├── feat/research-state
- ├── feat/evidence-middleware
- └── feat/skill-system
+main: minimal-agent → web-search-tool → research-state → middleware → skill
 ```
 
 日常流程：
 
 ```bash
-git switch -c feat/web-search-tool
 # 修改代码并测试
+uv run pytest -q
 git add .
 git commit -m "feat: add web search tool"
-git switch main
-git merge --no-ff feat/web-search-tool
 ```
 
 一次提交只完成一个可解释的变化。不要提交 `.env`、`.venv`、缓存、运行日志和本地数据库。
@@ -122,6 +121,7 @@ git merge --no-ff feat/web-search-tool
 |---|---|---|
 | `src/deepresearch/cli.py` | `backend/app/cli/main.py` | 接收用户输入 |
 | `src/deepresearch/config.py` | `backend/agents/config/` | 读取模型配置 |
+| `src/deepresearch/tools/web_search.py` | `agents/agent_tools/builtin/ddg_search.py` | 执行网页搜索 |
 | `build_agent()` | `agents/leader/factory.py` | 编译 Agent Graph |
 | `run_with_model()` | `agents/leader/agent.py` | 执行 Graph 并整理输出 |
 | `ResearchResult` | `AgentRunResult` | 稳定的输出边界 |
