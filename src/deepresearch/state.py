@@ -212,6 +212,7 @@ def create_initial_memory_state(namespace: str = "default") -> MemoryRuntimeStat
         "recalled": [],
         "recall_count": 0,
         "injected_tokens": 0,
+        "render_signature": None,
         "pending_write_count": 0,
         "last_error": None,
         "last_processed_run": None,

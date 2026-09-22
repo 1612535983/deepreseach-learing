@@ -40,6 +40,8 @@ class SkillSelectionMiddleware(AgentMiddleware):
         if not question:
             return None
         current = state.get("skills") or {}
+        if int(current.get("selection_count", 0)) > 0:
+            return None
         error_hash = hashlib.sha256(
             f"{question}\x00skill-selection-error".encode("utf-8")
         ).hexdigest()
@@ -90,14 +92,11 @@ class SkillSelectionMiddleware(AgentMiddleware):
                     "selected": refs,
                     "dropped": [],
                     "selection_count": int(current.get("selection_count", 0)) + 1,
-                    "injection_count": int(current.get("injection_count", 0)),
-                    "injected_tokens": int(current.get("injected_tokens", 0)),
-                    "aligned_tool_calls": int(
-                        current.get("aligned_tool_calls", 0)
-                    ),
-                    "completed_recorded": bool(
-                        current.get("completed_recorded", False)
-                    ),
+                    "injection_count": 0,
+                    "injected_tokens": 0,
+                    "render_signature": None,
+                    "aligned_tool_calls": 0,
+                    "completed_recorded": False,
                     "last_error": None,
                 }
             }

@@ -123,6 +123,7 @@ class SkillRef(TypedDict, total=False):
     reason: str
     forced: bool
     allowed_tools: list[str]
+    drop_reason: str
 
 
 class SkillRuntimeState(TypedDict, total=False):
@@ -135,6 +136,7 @@ class SkillRuntimeState(TypedDict, total=False):
     selection_count: int
     injection_count: int
     injected_tokens: int
+    render_signature: str | None
     aligned_tool_calls: int
     completed_recorded: bool
     last_error: str | None

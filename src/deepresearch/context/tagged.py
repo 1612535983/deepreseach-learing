@@ -142,9 +142,11 @@ class ContextAssembler:
         today_provider: Callable[[], date] = _today,
         *,
         memory_context_provider: Callable[[Mapping[str, Any]], str] | None = None,
+        skill_context_provider: Callable[[Mapping[str, Any]], str] | None = None,
     ) -> None:
         self._today_provider = today_provider
         self._memory_context_provider = memory_context_provider
+        self._skill_context_provider = skill_context_provider
 
     def assemble(
         self,
@@ -209,6 +211,11 @@ class ContextAssembler:
 
         if include_research_context:
             lines.extend(format_research_context(state).splitlines())
+
+        if self._skill_context_provider is not None:
+            skill_context = self._skill_context_provider(state)
+            if skill_context.strip():
+                lines.extend(skill_context.splitlines())
 
         if self._memory_context_provider is not None:
             memory_context = self._memory_context_provider(state)

@@ -37,6 +37,10 @@ from deepresearch.memory.bootstrap import (
     shutdown_memory_worker,
     start_memory_worker,
 )
+from deepresearch.skill.bootstrap import get_skill_manager
+from deepresearch.skill.config import SkillConfig
+from deepresearch.skill.context import SkillContextRenderer
+from deepresearch.skill.manager import SkillManager
 from deepresearch.middlewares import (
     ContextCompactionMiddleware,
     ContextExternalizationMiddleware,
@@ -47,6 +51,8 @@ from deepresearch.middlewares import (
     MemoryConsolidationMiddleware,
     ReflectionMiddleware,
     SequentialToolCallMiddleware,
+    SkillInjectionMiddleware,
+    SkillSelectionMiddleware,
     TaggedContextMiddleware,
 )
 from deepresearch.state import ResearchState, create_initial_state
@@ -129,6 +135,9 @@ def build_agent(
     memory_provider: MemoryProvider | None = None,
     memory_config: MemoryConfig | None = None,
     memory_worker: MemoryWorker | None = None,
+    skill_manager: SkillManager | None = None,
+    skill_config: SkillConfig | None = None,
+    skill_overrides: tuple[str, ...] = (),
 ) -> Any:
     """Compile the model and prompt into LangChain's ReAct agent graph."""
 
@@ -145,7 +154,21 @@ def build_agent(
         if memory_provider is not None
         else None
     )
-    context_assembler = ContextAssembler(memory_context_provider=memory_renderer)
+    resolved_skill_config = skill_config or (
+        skill_manager.config if skill_manager is not None else SkillConfig()
+    )
+    skill_renderer = (
+        SkillContextRenderer(
+            skill_manager.store,
+            token_budget=resolved_skill_config.token_budget,
+        )
+        if skill_manager is not None
+        else None
+    )
+    context_assembler = ContextAssembler(
+        memory_context_provider=memory_renderer,
+        skill_context_provider=skill_renderer,
+    )
 
     def project_model_messages(state: ResearchState) -> list[BaseMessage]:
         assembled = context_assembler.assemble(
@@ -175,6 +198,17 @@ def build_agent(
     if memory_worker is not None:
         middlewares.append(
             MemoryConsolidationMiddleware(memory_worker, resolved_memory_config)
+        )
+    if skill_manager is not None and skill_renderer is not None:
+        middlewares.extend(
+            [
+                SkillSelectionMiddleware(
+                    skill_manager,
+                    available_tools=tuple(sorted(tool_names)),
+                    overrides=skill_overrides,
+                ),
+                SkillInjectionMiddleware(skill_manager, skill_renderer),
+            ]
         )
     middlewares.extend(
         [
@@ -265,6 +299,9 @@ def run_with_model(
     memory_provider: MemoryProvider | None = None,
     memory_config: MemoryConfig | None = None,
     memory_worker: MemoryWorker | None = None,
+    skill_manager: SkillManager | None = None,
+    skill_config: SkillConfig | None = None,
+    skill_overrides: tuple[str, ...] = (),
 ) -> ResearchResult:
     """Run one question through a supplied model and return the final answer."""
 
@@ -282,6 +319,9 @@ def run_with_model(
         memory_provider=memory_provider,
         memory_config=memory_config,
         memory_worker=memory_worker,
+        skill_manager=skill_manager,
+        skill_config=skill_config,
+        skill_overrides=skill_overrides,
     )
     state = graph.invoke(
         create_initial_state(
@@ -304,6 +344,9 @@ def stream_with_model(
     memory_provider: MemoryProvider | None = None,
     memory_config: MemoryConfig | None = None,
     memory_worker: MemoryWorker | None = None,
+    skill_manager: SkillManager | None = None,
+    skill_config: SkillConfig | None = None,
+    skill_overrides: tuple[str, ...] = (),
 ) -> ResearchResult:
     """Run the graph once while synchronously delivering progress events."""
 
@@ -321,6 +364,9 @@ def stream_with_model(
         memory_provider=memory_provider,
         memory_config=memory_config,
         memory_worker=memory_worker,
+        skill_manager=skill_manager,
+        skill_config=skill_config,
+        skill_overrides=skill_overrides,
     )
     final_state: ResearchState | None = None
     on_event(
@@ -397,6 +443,9 @@ async def astream_with_model(
     memory_provider: MemoryProvider | None = None,
     memory_config: MemoryConfig | None = None,
     memory_worker: MemoryWorker | None = None,
+    skill_manager: SkillManager | None = None,
+    skill_config: SkillConfig | None = None,
+    skill_overrides: tuple[str, ...] = (),
 ) -> ResearchResult:
     """Run the graph once while asynchronously delivering progress events."""
 
@@ -414,6 +463,9 @@ async def astream_with_model(
         memory_provider=memory_provider,
         memory_config=memory_config,
         memory_worker=memory_worker,
+        skill_manager=skill_manager,
+        skill_config=skill_config,
+        skill_overrides=skill_overrides,
     )
     final_state: ResearchState | None = None
     await on_event(
@@ -488,6 +540,8 @@ def resume_with_model(
     memory_provider: MemoryProvider | None = None,
     memory_config: MemoryConfig | None = None,
     memory_worker: MemoryWorker | None = None,
+    skill_manager: SkillManager | None = None,
+    skill_config: SkillConfig | None = None,
 ) -> ResearchResult:
     """Continue an existing graph thread from its latest saved checkpoint."""
 
@@ -501,6 +555,8 @@ def resume_with_model(
         memory_provider=memory_provider,
         memory_config=memory_config,
         memory_worker=memory_worker,
+        skill_manager=skill_manager,
+        skill_config=skill_config,
     )
     state = cast(ResearchState, graph.invoke(None, config=config))
     return _result_from_state(question, state, normalized_thread_id)
@@ -516,6 +572,8 @@ def stream_resume_with_model(
     memory_provider: MemoryProvider | None = None,
     memory_config: MemoryConfig | None = None,
     memory_worker: MemoryWorker | None = None,
+    skill_manager: SkillManager | None = None,
+    skill_config: SkillConfig | None = None,
 ) -> ResearchResult:
     """Continue a saved graph thread while publishing synchronous events."""
 
@@ -529,6 +587,8 @@ def stream_resume_with_model(
         memory_provider=memory_provider,
         memory_config=memory_config,
         memory_worker=memory_worker,
+        skill_manager=skill_manager,
+        skill_config=skill_config,
     )
     final_state: ResearchState | None = None
     on_event(
@@ -599,12 +659,14 @@ def run_question(
     *,
     checkpointer: BaseCheckpointSaver | None = None,
     thread_id: str | None = None,
+    skill_overrides: tuple[str, ...] = (),
 ) -> ResearchResult:
     """Run a real model request using explicit settings or the local .env file."""
 
     resolved_settings = settings or Settings.from_env()
     model = build_model(resolved_settings)
     memory_provider, memory_worker = _resolve_memory_runtime(resolved_settings, model)
+    skill_manager = get_skill_manager(resolved_settings.skill)
     if checkpointer is not None:
         result = run_with_model(
             question,
@@ -615,6 +677,9 @@ def run_question(
             memory_provider=memory_provider,
             memory_config=resolved_settings.memory,
             memory_worker=memory_worker,
+            skill_manager=skill_manager,
+            skill_config=resolved_settings.skill,
+            skill_overrides=skill_overrides,
         )
     else:
         with open_sqlite_checkpointer() as sqlite_checkpointer:
@@ -627,6 +692,9 @@ def run_question(
                 memory_provider=memory_provider,
                 memory_config=resolved_settings.memory,
                 memory_worker=memory_worker,
+                skill_manager=skill_manager,
+                skill_config=resolved_settings.skill,
+                skill_overrides=skill_overrides,
             )
     _flush_memory_worker(memory_worker)
     return result
@@ -639,12 +707,14 @@ def stream_question(
     *,
     checkpointer: BaseCheckpointSaver | None = None,
     thread_id: str | None = None,
+    skill_overrides: tuple[str, ...] = (),
 ) -> ResearchResult:
     """Run a real model request and synchronously publish progress events."""
 
     resolved_settings = settings or Settings.from_env()
     model = build_model(resolved_settings)
     memory_provider, memory_worker = _resolve_memory_runtime(resolved_settings, model)
+    skill_manager = get_skill_manager(resolved_settings.skill)
     if checkpointer is not None:
         result = stream_with_model(
             question,
@@ -656,6 +726,9 @@ def stream_question(
             memory_provider=memory_provider,
             memory_config=resolved_settings.memory,
             memory_worker=memory_worker,
+            skill_manager=skill_manager,
+            skill_config=resolved_settings.skill,
+            skill_overrides=skill_overrides,
         )
     else:
         with open_sqlite_checkpointer() as sqlite_checkpointer:
@@ -669,6 +742,9 @@ def stream_question(
                 memory_provider=memory_provider,
                 memory_config=resolved_settings.memory,
                 memory_worker=memory_worker,
+                skill_manager=skill_manager,
+                skill_config=resolved_settings.skill,
+                skill_overrides=skill_overrides,
             )
     _flush_memory_worker(memory_worker)
     return result
@@ -681,12 +757,14 @@ async def astream_question(
     *,
     checkpointer: BaseCheckpointSaver | None = None,
     thread_id: str | None = None,
+    skill_overrides: tuple[str, ...] = (),
 ) -> ResearchResult:
     """Run a real model request and asynchronously publish progress events."""
 
     resolved_settings = settings or Settings.from_env()
     model = build_model(resolved_settings)
     memory_provider, memory_worker = _resolve_memory_runtime(resolved_settings, model)
+    skill_manager = get_skill_manager(resolved_settings.skill)
     if checkpointer is not None:
         result = await astream_with_model(
             question,
@@ -698,6 +776,9 @@ async def astream_question(
             memory_provider=memory_provider,
             memory_config=resolved_settings.memory,
             memory_worker=memory_worker,
+            skill_manager=skill_manager,
+            skill_config=resolved_settings.skill,
+            skill_overrides=skill_overrides,
         )
     else:
         async with open_async_sqlite_checkpointer() as sqlite_checkpointer:
@@ -711,6 +792,9 @@ async def astream_question(
                 memory_provider=memory_provider,
                 memory_config=resolved_settings.memory,
                 memory_worker=memory_worker,
+                skill_manager=skill_manager,
+                skill_config=resolved_settings.skill,
+                skill_overrides=skill_overrides,
             )
     if memory_worker is not None:
         flushed = await asyncio.to_thread(memory_worker.flush, 10.0)
@@ -730,6 +814,7 @@ def resume_question(
     resolved_settings = settings or Settings.from_env()
     model = build_model(resolved_settings)
     memory_provider, memory_worker = _resolve_memory_runtime(resolved_settings, model)
+    skill_manager = get_skill_manager(resolved_settings.skill)
     if checkpointer is not None:
         result = resume_with_model(
             thread_id,
@@ -739,6 +824,8 @@ def resume_question(
             memory_provider=memory_provider,
             memory_config=resolved_settings.memory,
             memory_worker=memory_worker,
+            skill_manager=skill_manager,
+            skill_config=resolved_settings.skill,
         )
     else:
         with open_sqlite_checkpointer() as sqlite_checkpointer:
@@ -750,6 +837,8 @@ def resume_question(
                 memory_provider=memory_provider,
                 memory_config=resolved_settings.memory,
                 memory_worker=memory_worker,
+                skill_manager=skill_manager,
+                skill_config=resolved_settings.skill,
             )
     _flush_memory_worker(memory_worker)
     return result
@@ -767,6 +856,7 @@ def stream_resume_question(
     resolved_settings = settings or Settings.from_env()
     model = build_model(resolved_settings)
     memory_provider, memory_worker = _resolve_memory_runtime(resolved_settings, model)
+    skill_manager = get_skill_manager(resolved_settings.skill)
     if checkpointer is not None:
         result = stream_resume_with_model(
             thread_id,
@@ -777,6 +867,8 @@ def stream_resume_question(
             memory_provider=memory_provider,
             memory_config=resolved_settings.memory,
             memory_worker=memory_worker,
+            skill_manager=skill_manager,
+            skill_config=resolved_settings.skill,
         )
     else:
         with open_sqlite_checkpointer() as sqlite_checkpointer:
@@ -789,6 +881,8 @@ def stream_resume_question(
                 memory_provider=memory_provider,
                 memory_config=resolved_settings.memory,
                 memory_worker=memory_worker,
+                skill_manager=skill_manager,
+                skill_config=resolved_settings.skill,
             )
     _flush_memory_worker(memory_worker)
     return result
