@@ -14,6 +14,11 @@ from deepresearch.context.types import (
     GovernanceState,
     TokenCountMethod,
 )
+from deepresearch.context.windows import (
+    ContextWindow,
+    resolve_context_window,
+    resolve_model_name,
+)
 
 __all__ = [
     "ContextBudget",
@@ -26,4 +31,7 @@ __all__ = [
     "TokenUsageUpdate",
     "collect_usage_delta",
     "estimate_context_tokens",
+    "ContextWindow",
+    "resolve_context_window",
+    "resolve_model_name",
 ]
