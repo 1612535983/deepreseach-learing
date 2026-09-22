@@ -1,10 +1,85 @@
-# DeepResearch 最小复现
+<div align="center">
 
-这个项目不是直接复制 Poirot，而是沿着 Poirot 的核心执行链逐层重建：先让最小 Agent 跑通，再按 Git 阶段加入 Tool、Middleware、State、Skill 和其他基础设施。
+<img src="docs/assets/readme-hero.svg" alt="DeepResearch Agent: Plan, Search, Evidence, Report and Memory" width="100%">
 
-当前版本是 **阶段 9E：具备 P1、P4、P5 上下文治理执行链的研究 Agent**。上下文占用达到
-40% 后先执行 P1 外化；达到 80% 后先保存可验证 Snapshot，再把较旧历史替换成结构化摘要，
-同时保留最近消息和完整 Tool 配对；达到 90% 后进入 P5 收尾模式，禁止继续扩张研究：
+# 🔬 DeepResearch Agent
+
+**一个可运行、可恢复、可审计的深度研究智能体**
+
+从自然语言问题出发，自动规划研究、搜索与读取网页、沉淀证据，并生成带来源的 Markdown 报告。
+
+[![Tests](https://github.com/1612535983/deepreseach-learing/actions/workflows/tests.yml/badge.svg)](https://github.com/1612535983/deepreseach-learing/actions/workflows/tests.yml)
+![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)
+![LangGraph](https://img.shields.io/badge/LangGraph-Stateful_Agent-1C3C3C)
+![Tests](https://img.shields.io/badge/tests-184_passed-2EA44F)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+[快速开始](#快速开始) · [工作流程](#工作流程) · [核心设计](#核心设计) · [学习路线](#分阶段复现路线) · [示例报告](examples/sample-report.md)
+
+</div>
+
+---
+
+## 项目简介
+
+DeepResearch Agent 是一个面向学习与工程实践的 LangGraph 研究 Agent。它的输入是一个
+自然语言问题，输出是包含回答、完整运行状态和可选 Markdown 报告的 `ResearchResult`。
+
+它解决的不是“调用一次大模型”，而是如何让模型在一个有边界的执行系统中完成长任务：
+
+- 先创建计划，再逐步搜索、阅读和整理证据；
+- 用结构化 State 记录事实，而不是依赖模型描述自己做过什么；
+- 用 Checkpoint 保存任务，使进程中断后仍能继续；
+- 在上下文接近上限时外化、压缩并强制收尾；
+- 在不同任务之间按需召回长期记忆。
+
+> [!NOTE]
+> 本项目是受 [Poirot](https://github.com/HezaoHezao/poirot) 启发的独立学习型实现，
+> 不是 Poirot 官方项目，也不是对其源码的逐文件复制。项目按照可运行、可测试的 Git 阶段，
+> 从最小 Agent 逐步重建 Tool、Middleware、State、Checkpoint、Context Governance 和 Memory。
+
+### 输入与输出
+
+| | 内容 |
+|---|---|
+| **输入** | 一个非空自然语言问题，例如“LangChain Agent 如何工作？” |
+| **输出** | 最终回答、完整 `ResearchState`、任务 `thread_id`，以及可选 Markdown 报告 |
+| **适合** | 技术调研、概念梳理、需要网页证据和引用的开放问题 |
+| **暂不保证** | 来源内容一定真实、语义结论一定正确；当前依靠规则检查完整性，不代替事实核验 |
+
+## 核心能力
+
+| 🔎 研究闭环 | 🧭 可恢复执行 | 📐 上下文治理 |
+|---|---|---|
+| 计划、搜索、正文读取、证据聚合、引用校验、报告生成 | SQLite Checkpoint、`thread_id` 隔离、流式事件、任务恢复 | Token 观测、P1 外化、P4 摘要压缩、P5 强制收尾 |
+| **🧠 长期记忆** | **🛡️ 安全边界** | **✅ 工程质量** |
+| Markdown truth store、BM25 召回、衰减、软遗忘、后台巩固 | SSRF 防护、重定向复检、响应体限制、密钥隔离 | 184 个测试、离线 Demo、GitHub Actions、模块化 Middleware |
+
+## 工作流程
+
+```mermaid
+flowchart LR
+    A[自然语言问题] --> B[创建研究计划]
+    B --> C[网页搜索]
+    C --> D[读取关键正文]
+    D --> E[沉淀来源与证据]
+    E --> F{质量检查}
+    F -->|仍有缺口| C
+    F -->|条件满足| G[生成并校验报告]
+    G --> H[ResearchResult / Markdown]
+
+    I[(SQLite Checkpoint)] -.保存与恢复.-> B
+    J[(长期记忆)] -.召回与巩固.-> E
+    K[Context Governance] -.外化 / 压缩 / 收尾.-> F
+```
+
+当前版本已完成 **阶段 10：长期记忆**。上下文占用达到 40% 后执行 P1 外化；达到 80%
+后先保存可验证 Snapshot，再用结构化摘要替换较旧历史；达到 90% 后进入 P5 收尾模式，
+禁止继续扩张研究。P2、P3 当前用于治理观测，尚未单独改写上下文。
+
+<details>
+<summary><strong>展开完整 Agent 执行链</strong></summary>
+
 
 ```text
 命令行问题
@@ -95,6 +170,8 @@ ResearchResult(question, answer, state)
 save_markdown_report() 创建 .md 文件
 ```
 
+</details>
+
 流式模式不会重新组装另一套 Agent。`create_agent()` 仍然只负责生成同一个 Graph，
 执行层可以选择 `invoke()` 一次性返回，或者选择 `stream()/astream()` 逐步接收结果：
 
@@ -120,14 +197,13 @@ LangGraph 在每个执行步骤后自动把 State 保存到 SQLite
 从最近的 Graph 节点继续执行
 ```
 
-## 输入和输出
+## 核心设计
 
-- 输入：一个非空的自然语言问题，例如“什么是 ReAct？”
-- 输出：`ResearchResult`，其中包含原始问题、模型最终回答和完整 `ResearchState`。
-- 当前解决的问题：创建计划、搜索和读取网页、记录证据、检查研究缺口、校验报告引用，并输出 Markdown 研究报告。
-- 当前不解决的问题：判断证据内容在语义上是否可靠、长期记忆、Skill 和多 Agent。
+这个项目把模型能力和确定性程序逻辑分开：模型负责规划、选择工具和撰写报告；程序负责
+记录真实执行结果、约束工具顺序、校验引用、保存 Checkpoint 和控制上下文预算。这样既保留
+Agent 的灵活性，也让关键状态可以测试、恢复和审计。
 
-## 环境准备
+## 快速开始
 
 项目要求 Python 3.12+，推荐使用 `uv`：
 
@@ -183,6 +259,10 @@ uv run deepresearch run "研究 LangChain Agent" \
 `--output` 只负责把 `State.final_report` 写入磁盘，不会调用 LLM，也不会覆盖已有文件。
 LLM 负责生成 Markdown 内容；`write_final_report` Tool 负责校验引用并更新 State；
 `save_markdown_report()` 才是真正创建 `.md` 文件的代码。
+
+想先看输出长什么样，可以打开
+[示例报告：LangChain Agent 如何工作？](examples/sample-report.md)。示例经过压缩，仅用于展示
+报告结构；真实输出会随问题、模型和搜索结果变化。
 
 实时显示计划、Tool、证据、反思和报告进度：
 
@@ -264,6 +344,28 @@ LangChain 消息。随后由内部摘要调用压缩较旧前缀，最近约 6 �
 `demo` 模式仍使用无工具的 Fake Model，保证在没有网络和 API Key 时也能验证基础链路。
 
 `.env` 已被 `.gitignore` 排除，真实 API Key 不会进入 Git。
+
+## 项目结构
+
+```text
+deepresearch-agent/
+├── src/deepresearch/
+│   ├── agent.py             # 组装并运行 Agent Graph
+│   ├── state.py             # 研究状态与 reducer
+│   ├── checkpointing.py     # SQLite Checkpoint 与任务恢复
+│   ├── context/             # Token、窗口、外化、快照和摘要策略
+│   ├── memory/              # 长期记忆 Schema、存储、检索与 Worker
+│   ├── middlewares/         # 证据、反思、治理、记忆等横切逻辑
+│   └── tools/               # 搜索、网页读取、计划和最终报告
+├── tests/                   # 184 个自动化测试
+├── examples/                # 可公开查看的输出样例
+├── .github/workflows/       # GitHub Actions 自动测试
+└── pyproject.toml           # 依赖、脚本入口与打包配置
+```
+
+第一次阅读代码，建议按
+`cli.py → agent.py → state.py → tools/ → middlewares/ → context/ → memory/`
+的顺序理解。先看输入如何进入系统，再看状态如何流动，会比从某个复杂 Middleware 开始容易。
 
 ## 名词解释
 
@@ -389,3 +491,31 @@ DEEPRESEARCH_MEMORY_ENABLE_EXTRACT=false
 将 `DEEPRESEARCH_MEMORY_ENABLE_EXTRACT` 改为 `true` 后，Agent 完整结束时会把任务
 提交给有界 Worker，由模型提取 episodic/semantic/procedural 记忆；Manager 本身
 不调用模型。`deepresearch inspect <thread_id>` 会同时显示本轮召回指标和外部记忆库统计。
+
+## 测试与贡献
+
+运行完整测试：
+
+```bash
+uv run pytest -q
+```
+
+当前测试覆盖 Agent 执行、工具、Middleware、Checkpoint、流式事件、上下文治理和长期记忆。
+每次 push 或 pull request 也会通过 GitHub Actions 在 Python 3.12 上自动执行测试。
+
+欢迎通过 Issue 提交 Bug、文档建议或可复现的改进想法。提交代码前请保证：
+
+1. 不包含 API Key、`.env`、本地数据库或运行时记忆；
+2. 一个提交只处理一个可以解释的问题；
+3. 新行为包含对应测试，且现有测试保持通过；
+4. README、类型注解和错误信息与代码行为一致。
+
+## 致谢与许可
+
+项目的架构学习自 [Poirot](https://github.com/HezaoHezao/poirot)，并建立在
+[LangChain](https://github.com/langchain-ai/langchain) 与
+[LangGraph](https://github.com/langchain-ai/langgraph) 等开源项目之上。完整说明见
+[ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md)。
+
+本项目采用 [MIT License](LICENSE)。你可以学习、使用和修改代码；分发副本或重要代码片段时，
+请保留许可证和版权声明。
