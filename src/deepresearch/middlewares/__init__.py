@@ -8,6 +8,7 @@ from deepresearch.middlewares.context_finalization import ContextFinalizationMid
 from deepresearch.middlewares.context_governance import ContextGovernanceMiddleware
 from deepresearch.middlewares.evidence import EvidenceMiddleware
 from deepresearch.middlewares.memory_recall import MemoryRecallMiddleware
+from deepresearch.middlewares.memory_consolidation import MemoryConsolidationMiddleware
 from deepresearch.middlewares.plan_context import PlanContextMiddleware
 from deepresearch.middlewares.reflection import ReflectionMiddleware
 from deepresearch.middlewares.sequential_tools import SequentialToolCallMiddleware
@@ -20,6 +21,7 @@ __all__ = [
     "ContextGovernanceMiddleware",
     "EvidenceMiddleware",
     "MemoryRecallMiddleware",
+    "MemoryConsolidationMiddleware",
     "PlanContextMiddleware",
     "ReflectionMiddleware",
     "SequentialToolCallMiddleware",

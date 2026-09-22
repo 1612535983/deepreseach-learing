@@ -29,6 +29,7 @@ from deepresearch.events import ResearchEvent, events_from_update
 from deepresearch.memory.config import MemoryConfig
 from deepresearch.memory.context import MemoryContextRenderer
 from deepresearch.memory.provider import MemoryProvider
+from deepresearch.memory.worker import MemoryWorker
 from deepresearch.middlewares import (
     ContextCompactionMiddleware,
     ContextExternalizationMiddleware,
@@ -36,6 +37,7 @@ from deepresearch.middlewares import (
     ContextGovernanceMiddleware,
     EvidenceMiddleware,
     MemoryRecallMiddleware,
+    MemoryConsolidationMiddleware,
     ReflectionMiddleware,
     SequentialToolCallMiddleware,
     TaggedContextMiddleware,
@@ -94,6 +96,7 @@ def build_agent(
     checkpointer: BaseCheckpointSaver | None = None,
     memory_provider: MemoryProvider | None = None,
     memory_config: MemoryConfig | None = None,
+    memory_worker: MemoryWorker | None = None,
 ) -> Any:
     """Compile the model and prompt into LangChain's ReAct agent graph."""
 
@@ -136,6 +139,10 @@ def build_agent(
     if memory_provider is not None:
         middlewares.append(
             MemoryRecallMiddleware(memory_provider, resolved_memory_config)
+        )
+    if memory_worker is not None:
+        middlewares.append(
+            MemoryConsolidationMiddleware(memory_worker, resolved_memory_config)
         )
     middlewares.extend(
         [
