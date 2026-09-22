@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
+
+from deepresearch.memory.config import MemoryConfig
 
 
 @dataclass(frozen=True)
@@ -15,6 +17,7 @@ class Settings:
     api_key: str
     model: str = "deepseek-chat"
     base_url: str | None = "https://api.deepseek.com"
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -28,5 +31,9 @@ class Settings:
 
         base_url = os.getenv("DEEPRESEARCH_BASE_URL", "").strip() or None
         model = os.getenv("DEEPRESEARCH_MODEL", "deepseek-chat").strip()
-        return cls(api_key=api_key, model=model, base_url=base_url)
-
+        return cls(
+            api_key=api_key,
+            model=model,
+            base_url=base_url,
+            memory=MemoryConfig.from_env(),
+        )

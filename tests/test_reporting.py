@@ -4,6 +4,7 @@ from langchain_core.messages import HumanMessage
 from deepresearch.reporting import (
     calculate_stats,
     format_governance_summary,
+    format_memory_summary,
     format_trace,
     save_markdown_report,
 )
@@ -202,6 +203,28 @@ def test_format_governance_summary_displays_recorded_metrics() -> None:
 
 def test_format_governance_summary_accepts_old_state() -> None:
     assert format_governance_summary(make_state()) == "上下文治理：暂无记录"
+
+
+def test_format_memory_summary_displays_runtime_metrics_and_accepts_old_state() -> None:
+    state = make_state()
+    assert format_memory_summary(state) == "长期记忆：暂无运行记录"
+    state["memory"] = {
+        "namespace": "project-a",
+        "last_query_hash": "hash",
+        "recalled": [{"id": "trace-1", "score": 0.8, "strength": 0.7}],
+        "recall_count": 2,
+        "injected_tokens": 88,
+        "pending_write_count": 1,
+        "last_error": None,
+    }
+
+    summary = format_memory_summary(state)
+
+    assert "Namespace：project-a" in summary
+    assert "召回执行次数：2" in summary
+    assert "当前召回数量：1" in summary
+    assert "记忆注入 Token：88" in summary
+    assert "当前召回 ID：trace-1" in summary
 
 
 def test_save_markdown_report_writes_final_report(tmp_path) -> None:  # noqa: ANN001

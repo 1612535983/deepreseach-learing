@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import atexit
+import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
@@ -30,6 +32,11 @@ from deepresearch.memory.config import MemoryConfig
 from deepresearch.memory.context import MemoryContextRenderer
 from deepresearch.memory.provider import MemoryProvider
 from deepresearch.memory.worker import MemoryWorker
+from deepresearch.memory.bootstrap import (
+    get_memory_provider,
+    shutdown_memory_worker,
+    start_memory_worker,
+)
 from deepresearch.middlewares import (
     ContextCompactionMiddleware,
     ContextExternalizationMiddleware,
@@ -88,6 +95,31 @@ def build_model(settings: Settings) -> BaseChatModel:
         base_url=settings.base_url,
         temperature=0,
     )
+
+
+_memory_shutdown_registered = False
+
+
+def _resolve_memory_runtime(
+    settings: Settings,
+    model: BaseChatModel,
+) -> tuple[MemoryProvider | None, MemoryWorker | None]:
+    """Create optional shared memory components for one application process."""
+
+    global _memory_shutdown_registered
+    provider = get_memory_provider(settings.memory)
+    worker = None
+    if provider is not None and settings.memory.enable_extract:
+        worker = start_memory_worker(provider, model, settings.memory)
+        if not _memory_shutdown_registered:
+            atexit.register(shutdown_memory_worker)
+            _memory_shutdown_registered = True
+    return provider, worker
+
+
+def _flush_memory_worker(worker: MemoryWorker | None) -> None:
+    if worker is not None and not worker.flush(timeout=10.0):
+        raise RuntimeError("长期记忆后台任务未能在 10 秒内完成。")
 
 
 def build_agent(
@@ -232,6 +264,7 @@ def run_with_model(
     thread_id: str | None = None,
     memory_provider: MemoryProvider | None = None,
     memory_config: MemoryConfig | None = None,
+    memory_worker: MemoryWorker | None = None,
 ) -> ResearchResult:
     """Run one question through a supplied model and return the final answer."""
 
@@ -248,6 +281,7 @@ def run_with_model(
         checkpointer=checkpointer,
         memory_provider=memory_provider,
         memory_config=memory_config,
+        memory_worker=memory_worker,
     )
     state = graph.invoke(
         create_initial_state(
@@ -267,6 +301,9 @@ def stream_with_model(
     on_event: Callable[[ResearchEvent], None],
     checkpointer: BaseCheckpointSaver | None = None,
     thread_id: str | None = None,
+    memory_provider: MemoryProvider | None = None,
+    memory_config: MemoryConfig | None = None,
+    memory_worker: MemoryWorker | None = None,
 ) -> ResearchResult:
     """Run the graph once while synchronously delivering progress events."""
 
@@ -277,7 +314,14 @@ def stream_with_model(
     resolved_thread_id, config = resolve_checkpoint_run(checkpointer, thread_id)
     if checkpointer is not None and resolved_thread_id is not None:
         ensure_new_thread(checkpointer, resolved_thread_id)
-    graph = build_agent(model, tools=tools, checkpointer=checkpointer)
+    graph = build_agent(
+        model,
+        tools=tools,
+        checkpointer=checkpointer,
+        memory_provider=memory_provider,
+        memory_config=memory_config,
+        memory_worker=memory_worker,
+    )
     final_state: ResearchState | None = None
     on_event(
         ResearchEvent(
@@ -295,7 +339,10 @@ def stream_with_model(
     )
     try:
         for mode, data in graph.stream(
-            create_initial_state(normalized_question),
+            create_initial_state(
+                normalized_question,
+                memory_namespace=(memory_config.namespace if memory_config else "default"),
+            ),
             config=config,
             stream_mode=["updates", "values"],
         ):
@@ -347,6 +394,9 @@ async def astream_with_model(
     on_event: Callable[[ResearchEvent], Awaitable[None]],
     checkpointer: BaseCheckpointSaver | None = None,
     thread_id: str | None = None,
+    memory_provider: MemoryProvider | None = None,
+    memory_config: MemoryConfig | None = None,
+    memory_worker: MemoryWorker | None = None,
 ) -> ResearchResult:
     """Run the graph once while asynchronously delivering progress events."""
 
@@ -357,7 +407,14 @@ async def astream_with_model(
     resolved_thread_id, config = resolve_checkpoint_run(checkpointer, thread_id)
     if checkpointer is not None and resolved_thread_id is not None:
         await ensure_new_thread_async(checkpointer, resolved_thread_id)
-    graph = build_agent(model, tools=tools, checkpointer=checkpointer)
+    graph = build_agent(
+        model,
+        tools=tools,
+        checkpointer=checkpointer,
+        memory_provider=memory_provider,
+        memory_config=memory_config,
+        memory_worker=memory_worker,
+    )
     final_state: ResearchState | None = None
     await on_event(
         ResearchEvent(
@@ -375,7 +432,10 @@ async def astream_with_model(
     )
     try:
         async for mode, data in graph.astream(
-            create_initial_state(normalized_question),
+            create_initial_state(
+                normalized_question,
+                memory_namespace=(memory_config.namespace if memory_config else "default"),
+            ),
             config=config,
             stream_mode=["updates", "values"],
         ):
@@ -425,13 +485,23 @@ def resume_with_model(
     tools: Sequence[BaseTool] | None = None,
     *,
     checkpointer: BaseCheckpointSaver,
+    memory_provider: MemoryProvider | None = None,
+    memory_config: MemoryConfig | None = None,
+    memory_worker: MemoryWorker | None = None,
 ) -> ResearchResult:
     """Continue an existing graph thread from its latest saved checkpoint."""
 
     normalized_thread_id = normalize_thread_id(thread_id)
     question = _question_from_checkpoint(checkpointer, normalized_thread_id)
     _, config = resolve_checkpoint_run(checkpointer, normalized_thread_id)
-    graph = build_agent(model, tools=tools, checkpointer=checkpointer)
+    graph = build_agent(
+        model,
+        tools=tools,
+        checkpointer=checkpointer,
+        memory_provider=memory_provider,
+        memory_config=memory_config,
+        memory_worker=memory_worker,
+    )
     state = cast(ResearchState, graph.invoke(None, config=config))
     return _result_from_state(question, state, normalized_thread_id)
 
@@ -443,13 +513,23 @@ def stream_resume_with_model(
     *,
     on_event: Callable[[ResearchEvent], None],
     checkpointer: BaseCheckpointSaver,
+    memory_provider: MemoryProvider | None = None,
+    memory_config: MemoryConfig | None = None,
+    memory_worker: MemoryWorker | None = None,
 ) -> ResearchResult:
     """Continue a saved graph thread while publishing synchronous events."""
 
     normalized_thread_id = normalize_thread_id(thread_id)
     question = _question_from_checkpoint(checkpointer, normalized_thread_id)
     _, config = resolve_checkpoint_run(checkpointer, normalized_thread_id)
-    graph = build_agent(model, tools=tools, checkpointer=checkpointer)
+    graph = build_agent(
+        model,
+        tools=tools,
+        checkpointer=checkpointer,
+        memory_provider=memory_provider,
+        memory_config=memory_config,
+        memory_worker=memory_worker,
+    )
     final_state: ResearchState | None = None
     on_event(
         ResearchEvent(
@@ -524,22 +604,32 @@ def run_question(
 
     resolved_settings = settings or Settings.from_env()
     model = build_model(resolved_settings)
+    memory_provider, memory_worker = _resolve_memory_runtime(resolved_settings, model)
     if checkpointer is not None:
-        return run_with_model(
+        result = run_with_model(
             question,
             model,
             tools=_research_tools(),
             checkpointer=checkpointer,
             thread_id=thread_id,
+            memory_provider=memory_provider,
+            memory_config=resolved_settings.memory,
+            memory_worker=memory_worker,
         )
-    with open_sqlite_checkpointer() as sqlite_checkpointer:
-        return run_with_model(
-            question,
-            model,
-            tools=_research_tools(),
-            checkpointer=sqlite_checkpointer,
-            thread_id=thread_id,
-        )
+    else:
+        with open_sqlite_checkpointer() as sqlite_checkpointer:
+            result = run_with_model(
+                question,
+                model,
+                tools=_research_tools(),
+                checkpointer=sqlite_checkpointer,
+                thread_id=thread_id,
+                memory_provider=memory_provider,
+                memory_config=resolved_settings.memory,
+                memory_worker=memory_worker,
+            )
+    _flush_memory_worker(memory_worker)
+    return result
 
 
 def stream_question(
@@ -554,24 +644,34 @@ def stream_question(
 
     resolved_settings = settings or Settings.from_env()
     model = build_model(resolved_settings)
+    memory_provider, memory_worker = _resolve_memory_runtime(resolved_settings, model)
     if checkpointer is not None:
-        return stream_with_model(
+        result = stream_with_model(
             question,
             model,
             tools=_research_tools(),
             on_event=on_event,
             checkpointer=checkpointer,
             thread_id=thread_id,
+            memory_provider=memory_provider,
+            memory_config=resolved_settings.memory,
+            memory_worker=memory_worker,
         )
-    with open_sqlite_checkpointer() as sqlite_checkpointer:
-        return stream_with_model(
-            question,
-            model,
-            tools=_research_tools(),
-            on_event=on_event,
-            checkpointer=sqlite_checkpointer,
-            thread_id=thread_id,
-        )
+    else:
+        with open_sqlite_checkpointer() as sqlite_checkpointer:
+            result = stream_with_model(
+                question,
+                model,
+                tools=_research_tools(),
+                on_event=on_event,
+                checkpointer=sqlite_checkpointer,
+                thread_id=thread_id,
+                memory_provider=memory_provider,
+                memory_config=resolved_settings.memory,
+                memory_worker=memory_worker,
+            )
+    _flush_memory_worker(memory_worker)
+    return result
 
 
 async def astream_question(
@@ -586,24 +686,37 @@ async def astream_question(
 
     resolved_settings = settings or Settings.from_env()
     model = build_model(resolved_settings)
+    memory_provider, memory_worker = _resolve_memory_runtime(resolved_settings, model)
     if checkpointer is not None:
-        return await astream_with_model(
+        result = await astream_with_model(
             question,
             model,
             tools=_research_tools(),
             on_event=on_event,
             checkpointer=checkpointer,
             thread_id=thread_id,
+            memory_provider=memory_provider,
+            memory_config=resolved_settings.memory,
+            memory_worker=memory_worker,
         )
-    async with open_async_sqlite_checkpointer() as sqlite_checkpointer:
-        return await astream_with_model(
-            question,
-            model,
-            tools=_research_tools(),
-            on_event=on_event,
-            checkpointer=sqlite_checkpointer,
-            thread_id=thread_id,
-        )
+    else:
+        async with open_async_sqlite_checkpointer() as sqlite_checkpointer:
+            result = await astream_with_model(
+                question,
+                model,
+                tools=_research_tools(),
+                on_event=on_event,
+                checkpointer=sqlite_checkpointer,
+                thread_id=thread_id,
+                memory_provider=memory_provider,
+                memory_config=resolved_settings.memory,
+                memory_worker=memory_worker,
+            )
+    if memory_worker is not None:
+        flushed = await asyncio.to_thread(memory_worker.flush, 10.0)
+        if not flushed:
+            raise RuntimeError("长期记忆后台任务未能在 10 秒内完成。")
+    return result
 
 
 def resume_question(
@@ -616,20 +729,30 @@ def resume_question(
 
     resolved_settings = settings or Settings.from_env()
     model = build_model(resolved_settings)
+    memory_provider, memory_worker = _resolve_memory_runtime(resolved_settings, model)
     if checkpointer is not None:
-        return resume_with_model(
+        result = resume_with_model(
             thread_id,
             model,
             tools=_research_tools(),
             checkpointer=checkpointer,
+            memory_provider=memory_provider,
+            memory_config=resolved_settings.memory,
+            memory_worker=memory_worker,
         )
-    with open_sqlite_checkpointer() as sqlite_checkpointer:
-        return resume_with_model(
-            thread_id,
-            model,
-            tools=_research_tools(),
-            checkpointer=sqlite_checkpointer,
-        )
+    else:
+        with open_sqlite_checkpointer() as sqlite_checkpointer:
+            result = resume_with_model(
+                thread_id,
+                model,
+                tools=_research_tools(),
+                checkpointer=sqlite_checkpointer,
+                memory_provider=memory_provider,
+                memory_config=resolved_settings.memory,
+                memory_worker=memory_worker,
+            )
+    _flush_memory_worker(memory_worker)
+    return result
 
 
 def stream_resume_question(
@@ -643,22 +766,32 @@ def stream_resume_question(
 
     resolved_settings = settings or Settings.from_env()
     model = build_model(resolved_settings)
+    memory_provider, memory_worker = _resolve_memory_runtime(resolved_settings, model)
     if checkpointer is not None:
-        return stream_resume_with_model(
+        result = stream_resume_with_model(
             thread_id,
             model,
             tools=_research_tools(),
             on_event=on_event,
             checkpointer=checkpointer,
+            memory_provider=memory_provider,
+            memory_config=resolved_settings.memory,
+            memory_worker=memory_worker,
         )
-    with open_sqlite_checkpointer() as sqlite_checkpointer:
-        return stream_resume_with_model(
-            thread_id,
-            model,
-            tools=_research_tools(),
-            on_event=on_event,
-            checkpointer=sqlite_checkpointer,
-        )
+    else:
+        with open_sqlite_checkpointer() as sqlite_checkpointer:
+            result = stream_resume_with_model(
+                thread_id,
+                model,
+                tools=_research_tools(),
+                on_event=on_event,
+                checkpointer=sqlite_checkpointer,
+                memory_provider=memory_provider,
+                memory_config=resolved_settings.memory,
+                memory_worker=memory_worker,
+            )
+    _flush_memory_worker(memory_worker)
+    return result
 
 
 def run_demo(question: str = "这个最小 Agent 的执行链是否已经跑通？") -> ResearchResult:

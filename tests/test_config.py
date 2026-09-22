@@ -2,6 +2,7 @@ import pytest
 
 from deepresearch import config as config_module
 from deepresearch.config import Settings
+from deepresearch.memory.config import MemoryConfig
 
 
 def test_settings_require_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -24,3 +25,35 @@ def test_settings_read_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.api_key == "test-key"
     assert settings.model == "test-model"
     assert settings.base_url == "https://example.com/v1"
+
+
+def test_memory_config_is_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DEEPRESEARCH_MEMORY_USE", raising=False)
+
+    config = MemoryConfig.from_env()
+
+    assert config.enabled is False
+    assert config.enable_recall is True
+    assert config.enable_extract is False
+
+
+def test_settings_read_memory_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEEPRESEARCH_API_KEY", "test-key")
+    monkeypatch.setenv("DEEPRESEARCH_MEMORY_USE", "default")
+    monkeypatch.setenv("DEEPRESEARCH_MEMORY_NAMESPACE", "project-a")
+    monkeypatch.setenv("DEEPRESEARCH_MEMORY_ENABLE_EXTRACT", "true")
+    monkeypatch.setenv("DEEPRESEARCH_MEMORY_TOP_K", "3")
+
+    settings = Settings.from_env()
+
+    assert settings.memory.enabled is True
+    assert settings.memory.namespace == "project-a"
+    assert settings.memory.enable_extract is True
+    assert settings.memory.top_k == 3
+
+
+def test_memory_config_rejects_invalid_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEEPRESEARCH_MEMORY_ENABLE_RECALL", "sometimes")
+
+    with pytest.raises(ValueError, match="MEMORY_ENABLE_RECALL"):
+        MemoryConfig.from_env()

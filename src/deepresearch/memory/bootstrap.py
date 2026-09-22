@@ -7,6 +7,7 @@ import threading
 from deepresearch.memory.config import MemoryConfig
 from deepresearch.memory.provider import MemoryProvider
 from deepresearch.memory.strategies.default.provider import build_default_provider
+from deepresearch.memory.worker import MemoryWorker
 
 
 _provider_lock = threading.Lock()
@@ -40,3 +41,49 @@ def set_memory_provider(provider: MemoryProvider | None) -> None:
 
 def reset_memory_provider() -> None:
     set_memory_provider(None)
+
+
+_worker_lock = threading.Lock()
+_memory_worker: MemoryWorker | None = None
+
+
+def start_memory_worker(
+    provider: MemoryProvider,
+    llm: object,
+    config: MemoryConfig,
+) -> MemoryWorker:
+    """Start and reuse the process-wide worker for the configured provider."""
+
+    global _memory_worker
+    if _memory_worker is not None:
+        return _memory_worker
+    with _worker_lock:
+        if _memory_worker is not None:
+            return _memory_worker
+        worker = MemoryWorker(provider.manager(), llm, config)  # type: ignore[arg-type]
+        worker.start()
+        _memory_worker = worker
+        return worker
+
+
+def get_memory_worker() -> MemoryWorker | None:
+    with _worker_lock:
+        return _memory_worker
+
+
+def shutdown_memory_worker(timeout: float = 5.0) -> None:
+    """Drain and clear the global worker."""
+
+    global _memory_worker
+    with _worker_lock:
+        worker = _memory_worker
+        _memory_worker = None
+    if worker is not None:
+        worker.shutdown(timeout)
+
+
+def reset_memory_runtime() -> None:
+    """Reset provider and worker globals for isolated tests."""
+
+    shutdown_memory_worker()
+    reset_memory_provider()

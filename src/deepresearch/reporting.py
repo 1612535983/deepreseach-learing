@@ -146,6 +146,34 @@ def format_governance_summary(state: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def format_memory_summary(state: Mapping[str, Any]) -> str:
+    """Render the compact runtime view without exposing stored memory bodies."""
+
+    memory = _mapping(state.get("memory"))
+    if not memory:
+        return "长期记忆：暂无运行记录"
+    recalled_value = memory.get("recalled")
+    recalled = recalled_value if isinstance(recalled_value, list) else []
+    recalled_ids = [
+        str(item.get("id"))
+        for item in recalled
+        if isinstance(item, Mapping) and item.get("id")
+    ]
+    lines = [
+        "长期记忆：",
+        f"Namespace：{memory.get('namespace') or 'default'}",
+        f"召回执行次数：{_non_negative_int(memory.get('recall_count')):,}",
+        f"当前召回数量：{len(recalled):,}",
+        f"记忆注入 Token：{_non_negative_int(memory.get('injected_tokens')):,}",
+        f"待处理写任务：{_non_negative_int(memory.get('pending_write_count')):,}",
+        f"当前召回 ID：{', '.join(recalled_ids) if recalled_ids else '无'}",
+    ]
+    last_error = memory.get("last_error")
+    if isinstance(last_error, str) and last_error:
+        lines.append(f"最近记忆错误：{last_error}")
+    return "\n".join(lines)
+
+
 def calculate_stats(state: ResearchState) -> ResearchStats:
     """Calculate mutually understandable counters from a completed state."""
 
@@ -266,6 +294,7 @@ def format_trace(state: ResearchState) -> str:
         lines.extend(f"- {gap}" for gap in research_gaps)
 
     lines.extend(["", *format_governance_summary(state).splitlines()])
+    lines.extend(["", *format_memory_summary(state).splitlines()])
 
     lines.extend(
         [

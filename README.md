@@ -310,8 +310,8 @@ LangChain 消息。随后由内部摘要调用压缩较旧前缀，最近约 6 �
 13. **阶段 9B（已完成）— Tagged Context**：保留原始 State，同时组装并审计带语义标签的模型请求视图。
 14. **阶段 9C（已完成）— P1 Tool 结果外化**：把较旧的大体积 Tool 结果安全保存到消息之外，只保留预览、引用和校验元数据。
 15. **阶段 9D（已完成）— P4 Snapshot 与摘要压缩**：保存带校验的压缩前快照，用结构化摘要替换旧上下文，并保证最近消息和 Tool 配对完整。
-16. **阶段 9E（当前）— P5 强制收尾**：高占用时拦截扩张型 Tool，引导模型生成最终产物，并用有界停止避免死循环。
-17. **阶段 10 — 记忆系统**：区分任务短期记忆和可跨任务检索的长期记忆。
+16. **阶段 9E（已完成）— P5 强制收尾**：高占用时拦截扩张型 Tool，引导模型生成最终产物，并用有界停止避免死循环。
+17. **阶段 10（已完成）— 记忆系统**：使用独立 Markdown truth store、BM25 召回、惰性衰减、软遗忘和后台巩固，实现跨任务长期记忆。
 18. **阶段 11 — Skill**：在上下文预算内加载“如何检索、核验来源、写报告”的过程知识。
 19. **后续阶段**：错误恢复与预算、评估、MCP、Sandbox、API/前端，最后再考虑多 Agent。
 
@@ -348,6 +348,7 @@ git commit -m "feat: add web search tool"
 | `src/deepresearch/context/externalizer.py` | P1 外化执行器 | 保存完整 Tool 结果，并生成保持相同 ID 的紧凑替代消息 |
 | `src/deepresearch/context/snapshot.py` | P4 Snapshot 执行器 | 压缩前保存带 SHA-256 校验的消息和 State，并支持验证加载 |
 | `src/deepresearch/context/summarizer.py` | P4 摘要执行器 | 安全划分新旧历史、调用内部摘要模型并生成消息替换 patch |
+| `src/deepresearch/memory/` | `agents/memory/` | 定义长期记忆 Schema、Store、Retriever、Manager、Provider、衰减策略和后台 Worker |
 | `src/deepresearch/tools/web_search.py` | `agents/agent_tools/builtin/ddg_search.py` | 执行网页搜索 |
 | `src/deepresearch/tools/read_page.py` | 网页读取类 Tool | 安全下载并提取网页正文 |
 | `src/deepresearch/tools/research_plan.py` | Todo/计划类状态 Tool | 创建计划并推进步骤状态 |
@@ -361,9 +362,30 @@ git commit -m "feat: add web search tool"
 | `src/deepresearch/middlewares/context_compaction.py` | P4 压缩 Middleware | 串联 Snapshot、摘要、Token 缩减校验和治理指标更新 |
 | `src/deepresearch/middlewares/context_finalization.py` | P5 收尾 Middleware | 拦截扩张型 Tool Call、允许报告类 Tool，并执行有界收尾 |
 | `src/deepresearch/middlewares/tagged_context.py` | Tagged Context Middleware | 请求前保存审计快照，并只对本次模型请求应用标签化投影 |
+| `src/deepresearch/middlewares/memory_recall.py` | Memory Middleware | 按 namespace 召回相关记忆，只把索引写入 State，并通过 Tagged Context 临时注入正文 |
+| `src/deepresearch/middlewares/memory_consolidation.py` | Memory Consolidation Middleware | Agent 完整结束后提交一次有界后台提取任务 |
 | `src/deepresearch/reporting.py` | 输出层 | 显示 Trace，并把 `final_report` 写成 `.md` 文件 |
 | `build_agent()` | `agents/leader/factory.py` | 编译 Agent Graph |
 | `run_with_model()` | `agents/leader/agent.py` | 执行 Graph 并整理输出 |
 | `ResearchResult` | `AgentRunResult` | 稳定的输出边界 |
 
 先掌握这 5 个位置，再扩展功能，会比一开始搬运 Poirot 的全部模块更容易定位问题。
+
+## 长期记忆
+
+长期记忆与 Checkpoint 是两套数据：`.deepresearch/checkpoints.sqlite` 保存单个
+`thread_id` 的 Graph State，`.deepresearch/memory/traces.md` 保存可跨任务召回的
+记忆。默认关闭；在 `.env` 中启用：
+
+```dotenv
+DEEPRESEARCH_MEMORY_USE=default
+DEEPRESEARCH_MEMORY_NAMESPACE=default
+DEEPRESEARCH_MEMORY_ENABLE_RECALL=true
+DEEPRESEARCH_MEMORY_ENABLE_EXTRACT=false
+```
+
+召回开启后，Retriever 使用中文/英文基础分词、BM25 和记忆 strength 排序。
+召回正文只进入本次请求的 `<memory_context>`，不会追加到正式 `messages`。
+将 `DEEPRESEARCH_MEMORY_ENABLE_EXTRACT` 改为 `true` 后，Agent 完整结束时会把任务
+提交给有界 Worker，由模型提取 episodic/semantic/procedural 记忆；Manager 本身
+不调用模型。`deepresearch inspect <thread_id>` 会同时显示本轮召回指标和外部记忆库统计。

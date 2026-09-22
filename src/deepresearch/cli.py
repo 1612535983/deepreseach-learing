@@ -7,6 +7,8 @@ import sqlite3
 from collections.abc import Sequence
 from typing import Any
 
+from dotenv import load_dotenv
+
 from deepresearch.agent import (
     resume_question,
     run_demo,
@@ -16,8 +18,13 @@ from deepresearch.agent import (
 )
 from deepresearch.checkpointing import get_checkpoint_tuple, open_sqlite_checkpointer
 from deepresearch.events import ResearchEvent
+from deepresearch.memory.bootstrap import get_memory_provider
+from deepresearch.memory.config import MemoryConfig
+from deepresearch.memory.schema import MemoryType
+from deepresearch.memory.types import MemoryFilter
 from deepresearch.reporting import (
     format_governance_summary,
+    format_memory_summary,
     format_research_event,
     format_trace,
     save_markdown_report,
@@ -57,8 +64,43 @@ def _checkpoint_summary(thread_id: str) -> str:
         f"最终报告：{'已生成' if state.get('final_report') else '未生成'}",
         "",
         *format_governance_summary(state).splitlines(),
+        "",
+        *format_memory_summary(state).splitlines(),
+        "",
+        *_memory_store_summary().splitlines(),
     ]
     return "\n".join(lines)
+
+
+def _memory_store_summary() -> str:
+    """Inspect the external truth store without requiring a model API key."""
+
+    load_dotenv()
+    config = MemoryConfig.from_env()
+    provider = get_memory_provider(config)
+    if provider is None:
+        return "长期记忆库：未启用"
+    traces = provider.store().list_by_filter(
+        MemoryFilter(namespace=config.namespace, include_forgotten=True)
+    )
+    active = [trace for trace in traces if not trace.metadata.get("forgotten")]
+    episodic = sum(trace.type == MemoryType.EPISODIC for trace in active)
+    semantic = sum(trace.type == MemoryType.SEMANTIC for trace in active)
+    procedural = sum(trace.type == MemoryType.PROCEDURAL for trace in active)
+    forgotten = len(traces) - len(active)
+    return "\n".join(
+        [
+            "长期记忆库：",
+            f"存储路径：{config.storage_path}",
+            f"Namespace：{config.namespace}",
+            f"记忆总数：{len(traces)}",
+            f"有效记忆：{len(active)}",
+            f"Episodic：{episodic}",
+            f"Semantic：{semantic}",
+            f"Procedural：{procedural}",
+            f"Forgotten：{forgotten}",
+        ]
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
