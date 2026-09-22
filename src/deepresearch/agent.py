@@ -27,6 +27,7 @@ from deepresearch.context.tagged import ContextAssembler
 from deepresearch.config import Settings
 from deepresearch.events import ResearchEvent, events_from_update
 from deepresearch.middlewares import (
+    ContextCompactionMiddleware,
     ContextExternalizationMiddleware,
     ContextGovernanceMiddleware,
     EvidenceMiddleware,
@@ -110,6 +111,7 @@ def build_agent(
             message_projector=project_model_messages,
         ),
         ContextExternalizationMiddleware(),
+        ContextCompactionMiddleware(model),
     ]
     state_mutating_tools = {
         "write_research_plan",

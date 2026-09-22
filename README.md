@@ -2,9 +2,9 @@
 
 这个项目不是直接复制 Poirot，而是沿着 Poirot 的核心执行链逐层重建：先让最小 Agent 跑通，再按 Git 阶段加入 Tool、Middleware、State、Skill 和其他基础设施。
 
-当前版本是 **阶段 9C：能够执行 P1 Tool 结果外化的研究 Agent**。上下文占用达到 40% 后，
-较旧的大型 Tool 结果会先安全写入外部文件，再由 State 中的同 ID 消息替换成预览和文件引用。
-P4 摘要压缩和 P5 强制收尾尚未实现；P4 压缩前 Snapshot 的可恢复存储底座已经具备：
+当前版本是 **阶段 9D：能够执行 P4 Snapshot 与摘要压缩的研究 Agent**。上下文占用达到
+40% 后先执行 P1 外化；达到 80% 后先保存可验证 Snapshot，再把较旧历史替换成结构化摘要，
+同时保留最近消息和完整 Tool 配对。P5 强制收尾尚未实现：
 
 ```text
 命令行问题
@@ -35,6 +35,12 @@ ContextExternalizationMiddleware 外化较旧的大型 Tool 结果
     ├── 完整内容 → .deepresearch/externalized/<thread_id>/*.json
     ├── ToolMessage → 预览 + 路径 + estimated_tokens_saved
     └── 最近两个大型 Tool 结果保留原文
+    ↓
+ContextCompactionMiddleware 执行 P4
+    ├── 压缩前 State/messages → .deepresearch/snapshots/<thread_id>/*.json
+    ├── 内部摘要模型生成结构化 Markdown
+    ├── 摘要没有减少 Token → 保留原消息
+    └── 摘要成功 → summary + 最近消息（保持 Tool 配对）
     ↓
 TaggedContextMiddleware 组装 request-scoped 模型视图
     ├── <system> / <goal> / <date>
@@ -238,6 +244,11 @@ Plan 和 `current_step_id` 的 Tool 逐轮执行，避免多个 `Command` 同时
 旧 `ToolMessage`，最近两个结果暂时豁免；完整内容写入成功后，使用相同 message ID 把 State
 中的消息替换成预览和路径。外化文件默认位于 `.deepresearch/externalized/<thread_id>/`，
 目录已被 Git 忽略。写盘失败时不会替换原消息，以免丢失证据。
+`ContextCompactionMiddleware` 消费 P4。它先把压缩前 messages 和非消息 State 保存到
+`.deepresearch/snapshots/<thread_id>/`，快照带 schema 版本和 SHA-256 校验，并可恢复为
+LangChain 消息。随后由内部摘要调用压缩较旧前缀，最近约 6 条消息按完整交互单元保留，
+不会拆开 `AIMessage(tool_calls)` 与对应 `ToolMessage`。Snapshot、摘要调用或 Token 缩减校验
+任一步失败，都不会删除原历史。内部摘要调用不计入主 Agent 的 `model_call_count`。
 `demo` 模式仍使用无工具的 Fake Model，保证在没有网络和 API Key 时也能验证基础链路。
 
 `.env` 已被 `.gitignore` 排除，真实 API Key 不会进入 Git。
@@ -264,6 +275,8 @@ Plan 和 `current_step_id` 的 Tool 逐轮执行，避免多个 `Command` 同时
 - **上下文窗口**：一次模型请求可容纳的 Token 上限。当前按显式配置、模型属性、名称映射、默认值的顺序识别，并记录识别来源。
 - **pending_stages**：当前占用比例已经触发但尚未真正执行的 P1～P5 治理阶段。
 - **外化（Externalization）**：把大体积内容从模型消息搬到外部文件，消息中只保留预览、文件位置和校验元数据。它减少上下文 Token，但不等同于删除原始结果。
+- **Snapshot**：压缩前保存的可校验恢复点。P4 摘要丢失细节时，仍可通过快照和外化文件追溯原内容。
+- **摘要压缩**：让内部模型把较旧消息转换成结构化摘要，再用 LangGraph 消息 reducer 清理旧前缀并保留最近对话。
 
 ## 分阶段复现路线
 
@@ -282,8 +295,8 @@ Plan 和 `current_step_id` 的 Tool 逐轮执行，避免多个 `Command` 同时
 11. **阶段 8B（已完成）— SQLite Checkpointer**：让 Checkpoint 跨进程持久化，并增加 `resume` 和 `inspect` 命令。
 12. **阶段 9A（已完成）— Context Governance 观测层**：增加治理 State、Token 统计、模型窗口识别、阈值判断、Middleware 记录，以及 Trace/inspect 展示；暂不修改消息。
 13. **阶段 9B（已完成）— Tagged Context**：保留原始 State，同时组装并审计带语义标签的模型请求视图。
-14. **阶段 9C（当前）— P1 Tool 结果外化**：把较旧的大体积 Tool 结果安全保存到消息之外，只保留预览、引用和校验元数据。
-15. **阶段 9D — P4 Snapshot 与摘要压缩**：保存压缩前快照，并把较旧上下文替换成可恢复摘要。
+14. **阶段 9C（已完成）— P1 Tool 结果外化**：把较旧的大体积 Tool 结果安全保存到消息之外，只保留预览、引用和校验元数据。
+15. **阶段 9D（当前）— P4 Snapshot 与摘要压缩**：保存带校验的压缩前快照，用结构化摘要替换旧上下文，并保证最近消息和 Tool 配对完整。
 16. **阶段 9E — P5 强制收尾**：高占用时停止继续调用 Tool，引导模型生成最终产物。
 17. **阶段 10 — 记忆系统**：区分任务短期记忆和可跨任务检索的长期记忆。
 18. **阶段 11 — Skill**：在上下文预算内加载“如何检索、核验来源、写报告”的过程知识。
@@ -321,6 +334,7 @@ git commit -m "feat: add web search tool"
 | `src/deepresearch/context/tagged.py` | Tagged Context 组装层 | 把选定 State 和消息转换成 request-scoped 标签化视图 |
 | `src/deepresearch/context/externalizer.py` | P1 外化执行器 | 保存完整 Tool 结果，并生成保持相同 ID 的紧凑替代消息 |
 | `src/deepresearch/context/snapshot.py` | P4 Snapshot 执行器 | 压缩前保存带 SHA-256 校验的消息和 State，并支持验证加载 |
+| `src/deepresearch/context/summarizer.py` | P4 摘要执行器 | 安全划分新旧历史、调用内部摘要模型并生成消息替换 patch |
 | `src/deepresearch/tools/web_search.py` | `agents/agent_tools/builtin/ddg_search.py` | 执行网页搜索 |
 | `src/deepresearch/tools/read_page.py` | 网页读取类 Tool | 安全下载并提取网页正文 |
 | `src/deepresearch/tools/research_plan.py` | Todo/计划类状态 Tool | 创建计划并推进步骤状态 |
@@ -331,6 +345,7 @@ git commit -m "feat: add web search tool"
 | `src/deepresearch/middlewares/reflection.py` | 反思/质量控制 Middleware | 在结束前检查缺口，并有限次回到模型 |
 | `src/deepresearch/middlewares/context_governance.py` | 上下文治理 Middleware | 每次模型调用后把测量和阈值判断结果写入 State |
 | `src/deepresearch/middlewares/context_externalization.py` | P1 外化 Middleware | 调用模型前消费 P1，并累计外化数量和预计节省 Token |
+| `src/deepresearch/middlewares/context_compaction.py` | P4 压缩 Middleware | 串联 Snapshot、摘要、Token 缩减校验和治理指标更新 |
 | `src/deepresearch/middlewares/tagged_context.py` | Tagged Context Middleware | 请求前保存审计快照，并只对本次模型请求应用标签化投影 |
 | `src/deepresearch/reporting.py` | 输出层 | 显示 Trace，并把 `final_report` 写成 `.md` 文件 |
 | `build_agent()` | `agents/leader/factory.py` | 编译 Agent Graph |

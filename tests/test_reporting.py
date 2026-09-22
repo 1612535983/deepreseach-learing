@@ -149,6 +149,22 @@ def test_format_governance_summary_displays_recorded_metrics() -> None:
                 ],
                 "last_error": None,
             },
+            "summary": "压缩摘要",
+            "summary_id": "p4-summary-1",
+            "compaction": {
+                "snapshot_count": 1,
+                "summarize_count": 1,
+                "removed_message_count": 12,
+                "estimated_tokens_saved": 6_200,
+                "last_preserved_message_count": 6,
+                "last_tokens_before": 20_000,
+                "last_tokens_after": 13_800,
+                "last_snapshot_path": (
+                    ".deepresearch/snapshots/run/snapshot.json"
+                ),
+                "last_summary_id": "p4-summary-1",
+                "last_error": None,
+            },
         }
     }
 
@@ -164,6 +180,9 @@ def test_format_governance_summary_displays_recorded_metrics() -> None:
     assert "硬限制：否" in summary
     assert "P1 外化：2 个 Tool 结果；预计节省 4,750 Token" in summary
     assert ".deepresearch/externalized/run/result.json" in summary
+    assert "P4 压缩：1 次摘要；1 个快照；累计移除 12 条消息" in summary
+    assert "预计节省 6,200 Token" in summary
+    assert ".deepresearch/snapshots/run/snapshot.json" in summary
     assert "seen_message_usage" not in summary
 
 

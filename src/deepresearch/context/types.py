@@ -45,6 +45,21 @@ class ContextExternalizationMetrics(TypedDict, total=False):
     last_error: str | None
 
 
+class ContextCompactionMetrics(TypedDict, total=False):
+    """Cumulative P4 activity plus the latest compaction measurements."""
+
+    snapshot_count: int
+    summarize_count: int
+    removed_message_count: int
+    estimated_tokens_saved: int
+    last_preserved_message_count: int
+    last_tokens_before: int
+    last_tokens_after: int
+    last_snapshot_path: str | None
+    last_summary_id: str | None
+    last_error: str | None
+
+
 class ContextGovernanceState(TypedDict, total=False):
     """Checkpoint-safe measurements and decisions for context governance."""
 
@@ -56,6 +71,9 @@ class ContextGovernanceState(TypedDict, total=False):
     hard_limit_reached: bool
     seen_message_usage: dict[str, CumulativeTokenUsage]
     externalization: ContextExternalizationMetrics
+    summary: str | None
+    summary_id: str | None
+    compaction: ContextCompactionMetrics
 
 
 class GovernanceState(TypedDict, total=False):

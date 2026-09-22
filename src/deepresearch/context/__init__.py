@@ -16,6 +16,11 @@ from deepresearch.context.snapshot import (
     ContextSnapshotter,
     SnapshotResult,
 )
+from deepresearch.context.summarizer import (
+    CompactedMessages,
+    CompressionPlan,
+    ContextSummarizer,
+)
 from deepresearch.context.tokens import (
     TokenEstimate,
     TokenUsageUpdate,
@@ -24,6 +29,7 @@ from deepresearch.context.tokens import (
 )
 from deepresearch.context.types import (
     ContextBudget,
+    ContextCompactionMetrics,
     ContextGovernanceState,
     ContextExternalizationMetrics,
     ContextStage,
@@ -43,17 +49,21 @@ __all__ = [
     "ExternalizationBatch",
     "ExternalizedToolResult",
     "ContextBudget",
+    "ContextCompactionMetrics",
     "ContextDecision",
     "ContextExternalizationMetrics",
     "ContextGovernanceState",
     "ContextStage",
     "ContextSnapshot",
     "ContextSnapshotter",
+    "ContextSummarizer",
     "ContextThresholds",
     "CumulativeTokenUsage",
     "GovernanceState",
     "TaggedContextState",
     "SnapshotResult",
+    "CompactedMessages",
+    "CompressionPlan",
     "TokenCountMethod",
     "TokenEstimate",
     "TokenUsageUpdate",

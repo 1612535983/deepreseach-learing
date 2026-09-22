@@ -54,6 +54,7 @@ def format_governance_summary(state: Mapping[str, Any]) -> str:
     budget = _mapping(context.get("budget"))
     usage = _mapping(context.get("cumulative_usage"))
     externalization = _mapping(context.get("externalization"))
+    compaction = _mapping(context.get("compaction"))
     model_name = context.get("model_name")
     if not isinstance(model_name, str) or not model_name.strip():
         model_name = "未知"
@@ -108,6 +109,21 @@ def format_governance_summary(state: Mapping[str, Any]) -> str:
         last_error = externalization.get("last_error")
         if isinstance(last_error, str) and last_error:
             lines.append(f"最近外化错误：{last_error}")
+    if compaction:
+        lines.append(
+            "P4 压缩："
+            f"{_non_negative_int(compaction.get('summarize_count')):,} 次摘要；"
+            f"{_non_negative_int(compaction.get('snapshot_count')):,} 个快照；"
+            f"累计移除 {_non_negative_int(compaction.get('removed_message_count')):,} 条消息；"
+            "预计节省 "
+            f"{_non_negative_int(compaction.get('estimated_tokens_saved')):,} Token"
+        )
+        snapshot_path = compaction.get("last_snapshot_path")
+        if isinstance(snapshot_path, str) and snapshot_path:
+            lines.append(f"最近 P4 快照：{snapshot_path}")
+        compaction_error = compaction.get("last_error")
+        if isinstance(compaction_error, str) and compaction_error:
+            lines.append(f"最近 P4 错误：{compaction_error}")
     return "\n".join(lines)
 
 

@@ -4,6 +4,7 @@ from deepresearch.middlewares.context_governance import ContextGovernanceMiddlew
 from deepresearch.middlewares.context_externalization import (
     ContextExternalizationMiddleware,
 )
+from deepresearch.middlewares.context_compaction import ContextCompactionMiddleware
 from deepresearch.middlewares.evidence import EvidenceMiddleware
 from deepresearch.middlewares.plan_context import PlanContextMiddleware
 from deepresearch.middlewares.reflection import ReflectionMiddleware
@@ -13,6 +14,7 @@ from deepresearch.middlewares.tagged_context import TaggedContextMiddleware
 __all__ = [
     "ContextGovernanceMiddleware",
     "ContextExternalizationMiddleware",
+    "ContextCompactionMiddleware",
     "EvidenceMiddleware",
     "PlanContextMiddleware",
     "ReflectionMiddleware",

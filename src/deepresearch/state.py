@@ -206,6 +206,20 @@ def create_initial_governance_state() -> GovernanceState:
                 "last_externalized_paths": [],
                 "last_error": None,
             },
+            "summary": None,
+            "summary_id": None,
+            "compaction": {
+                "snapshot_count": 0,
+                "summarize_count": 0,
+                "removed_message_count": 0,
+                "estimated_tokens_saved": 0,
+                "last_preserved_message_count": 0,
+                "last_tokens_before": 0,
+                "last_tokens_after": 0,
+                "last_snapshot_path": None,
+                "last_summary_id": None,
+                "last_error": None,
+            },
         }
     }
 

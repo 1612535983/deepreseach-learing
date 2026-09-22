@@ -24,6 +24,7 @@ DEEPRESEARCH_EXTERNALIZED = "deepresearch.externalized"
 DEEPRESEARCH_EXTERNALIZED_PATH = "deepresearch.externalized_path"
 DEEPRESEARCH_EXTERNALIZED_META = "deepresearch.externalized_meta"
 DEEPRESEARCH_COMPACTION_STAGE = "deepresearch.compaction_stage"
+DEEPRESEARCH_SNAPSHOT_PATH = "deepresearch.snapshot_path"
 
 _CST = timezone(timedelta(hours=8))
 
@@ -186,6 +187,19 @@ class ContextAssembler:
         question = state.get("research_question")
         if isinstance(question, str) and question:
             lines.append(f"<goal>{escape(question)}</goal>")
+
+        governance = state.get("governance")
+        if isinstance(governance, Mapping):
+            context = governance.get("context")
+            summary = context.get("summary") if isinstance(context, Mapping) else None
+            if isinstance(summary, str) and summary.strip():
+                lines.extend(
+                    [
+                        "<summary>",
+                        escape(summary),
+                        "</summary>",
+                    ]
+                )
 
         if include_research_context:
             lines.extend(format_research_context(state).splitlines())
