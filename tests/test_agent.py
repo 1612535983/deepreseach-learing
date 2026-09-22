@@ -70,8 +70,14 @@ tags: [verification]
     assert [item["name"] for item in selected] == ["source-verification"]
     assert result.state["skills"]["selection_count"] == 1
     assert result.state["skills"]["injection_count"] == 1
+    assert result.state["skills"]["completed_recorded"] is True
     rendered = result.state["tagged_context"]["rendered"]
     assert '<skill name="source-verification"' in rendered
     assert "优先使用一手来源" in rendered
     assert not any(message.type == "system" for message in result.state["messages"])
+    metrics = manager.store.get_metrics(selected[0]["skill_id"])
+    assert metrics is not None
+    assert metrics.selections == 1
+    assert metrics.injections == 1
+    assert metrics.completed_runs == 1
     manager.close()

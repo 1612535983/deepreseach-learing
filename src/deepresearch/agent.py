@@ -52,6 +52,7 @@ from deepresearch.middlewares import (
     ReflectionMiddleware,
     SequentialToolCallMiddleware,
     SkillInjectionMiddleware,
+    SkillMetricsMiddleware,
     SkillSelectionMiddleware,
     TaggedContextMiddleware,
 )
@@ -210,6 +211,8 @@ def build_agent(
                 SkillInjectionMiddleware(skill_manager, skill_renderer),
             ]
         )
+        if resolved_skill_config.enable_metrics:
+            middlewares.append(SkillMetricsMiddleware(skill_manager))
     middlewares.extend(
         [
             ContextGovernanceMiddleware(

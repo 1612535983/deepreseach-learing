@@ -14,6 +14,7 @@ from deepresearch.middlewares.reflection import ReflectionMiddleware
 from deepresearch.middlewares.sequential_tools import SequentialToolCallMiddleware
 from deepresearch.middlewares.skill_selection import SkillSelectionMiddleware
 from deepresearch.middlewares.skill_injection import SkillInjectionMiddleware
+from deepresearch.middlewares.skill_metrics import SkillMetricsMiddleware
 from deepresearch.middlewares.tagged_context import TaggedContextMiddleware
 
 __all__ = [
@@ -29,5 +30,6 @@ __all__ = [
     "SequentialToolCallMiddleware",
     "SkillSelectionMiddleware",
     "SkillInjectionMiddleware",
+    "SkillMetricsMiddleware",
     "TaggedContextMiddleware",
 ]
