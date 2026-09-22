@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
 
+from deepresearch.evaluation.config import EvaluationConfig
 from deepresearch.memory.config import MemoryConfig
 from deepresearch.skill.config import SkillConfig
 
@@ -20,6 +21,7 @@ class Settings:
     base_url: str | None = "https://api.deepseek.com"
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     skill: SkillConfig = field(default_factory=SkillConfig)
+    evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -39,4 +41,5 @@ class Settings:
             base_url=base_url,
             memory=MemoryConfig.from_env(),
             skill=SkillConfig.from_env(),
+            evaluation=EvaluationConfig.from_env(),
         )

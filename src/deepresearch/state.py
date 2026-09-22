@@ -15,6 +15,7 @@ from langchain.agents import AgentState
 from langchain_core.messages import HumanMessage
 
 from deepresearch.context.types import GovernanceState, TaggedContextState
+from deepresearch.evaluation.types import EvaluationState
 from deepresearch.memory.types import MemoryRuntimeState
 from deepresearch.skill.types import SkillRuntimeState
 
@@ -203,6 +204,22 @@ def merge_skill_runtime(
     return cast(SkillRuntimeState, merged)
 
 
+def merge_evaluation_state(
+    current: EvaluationState | None,
+    incoming: EvaluationState | None,
+) -> EvaluationState:
+    """Deep-merge evaluator patches so hooks can update individual counters."""
+
+    merged = deepcopy(dict(current or {}))
+    for key, value in dict(incoming or {}).items():
+        current_value = merged.get(key)
+        if isinstance(current_value, dict) and isinstance(value, dict):
+            current_value.update(deepcopy(value))
+        else:
+            merged[key] = deepcopy(value)
+    return cast(EvaluationState, merged)
+
+
 def create_initial_memory_state(namespace: str = "default") -> MemoryRuntimeState:
     """Create the checkpoint-safe runtime view for long-term memory."""
 
@@ -236,6 +253,36 @@ def create_initial_skill_state() -> SkillRuntimeState:
         "aligned_tool_calls": 0,
         "completed_recorded": False,
         "last_error": None,
+    }
+
+
+def create_initial_evaluation_state() -> EvaluationState:
+    """Create the complete checkpoint-safe report evaluation namespace."""
+
+    return {
+        "report": {
+            "status": "not_run",
+            "mode": "shadow",
+            "signature": None,
+            "report_hash": None,
+            "evidence_hash": None,
+            "provider": None,
+            "model": None,
+            "answers": {},
+            "composite_score": None,
+            "recommended_action": None,
+            "runtime_action": None,
+            "evaluation_count": 0,
+            "gate_attempts": 0,
+            "input_chars": 0,
+            "latency_ms": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cost_usd": None,
+            "evaluated_at": None,
+            "last_error": None,
+            "notes": [],
+        }
     }
 
 
@@ -315,6 +362,7 @@ class ResearchState(AgentState):
     tagged_context: Annotated[TaggedContextState | None, merge_tagged_context]
     memory: Annotated[MemoryRuntimeState, merge_memory_runtime]
     skills: Annotated[SkillRuntimeState, merge_skill_runtime]
+    evaluation: Annotated[EvaluationState, merge_evaluation_state]
 
 
 def create_initial_state(
@@ -340,4 +388,5 @@ def create_initial_state(
         "tagged_context": None,
         "memory": create_initial_memory_state(memory_namespace),
         "skills": create_initial_skill_state(),
+        "evaluation": create_initial_evaluation_state(),
     }

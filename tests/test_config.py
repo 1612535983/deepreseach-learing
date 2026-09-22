@@ -2,6 +2,7 @@ import pytest
 
 from deepresearch import config as config_module
 from deepresearch.config import Settings
+from deepresearch.evaluation.config import EvaluationConfig
 from deepresearch.memory.config import MemoryConfig
 from deepresearch.skill.config import SkillConfig
 
@@ -70,3 +71,15 @@ def test_settings_read_skill_environment(monkeypatch: pytest.MonkeyPatch) -> Non
     assert isinstance(settings.skill, SkillConfig)
     assert settings.skill.enabled is True
     assert settings.skill.max_skills == 2
+
+
+def test_settings_read_evaluation_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEEPRESEARCH_API_KEY", "test-key")
+    monkeypatch.setenv("DEEPRESEARCH_EVALUATION_USE", "jev")
+    monkeypatch.setenv("DEEPRESEARCH_JEV_API_KEY", "jev-key")
+
+    settings = Settings.from_env()
+
+    assert isinstance(settings.evaluation, EvaluationConfig)
+    assert settings.evaluation.enabled is True
+    assert settings.evaluation.api_key == "jev-key"
