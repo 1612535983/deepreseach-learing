@@ -1,6 +1,7 @@
 """Versioned process-knowledge bundles for the research agent."""
 
 from deepresearch.skill.config import SkillConfig
+from deepresearch.skill.manager import SkillManager
 from deepresearch.skill.selector import SkillSelector
 from deepresearch.skill.store import SQLiteSkillStore, SkillStore
 from deepresearch.skill.types import (
@@ -21,6 +22,7 @@ __all__ = [
     "SkillDiscoveryError",
     "SkillDiscoveryResult",
     "SkillLineage",
+    "SkillManager",
     "SkillMetrics",
     "SkillRecord",
     "SkillRef",

@@ -23,6 +23,8 @@ def test_create_initial_state_contains_research_fields() -> None:
     assert state["research_gaps"] == []
     assert state["final_report"] is None
     assert state["tagged_context"] is None
+    assert state["skills"]["selected"] == []
+    assert state["skills"]["selection_count"] == 0
 
 
 def test_search_records_and_observations_append() -> None:

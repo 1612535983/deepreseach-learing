@@ -12,6 +12,7 @@ from deepresearch.middlewares.memory_consolidation import MemoryConsolidationMid
 from deepresearch.middlewares.plan_context import PlanContextMiddleware
 from deepresearch.middlewares.reflection import ReflectionMiddleware
 from deepresearch.middlewares.sequential_tools import SequentialToolCallMiddleware
+from deepresearch.middlewares.skill_selection import SkillSelectionMiddleware
 from deepresearch.middlewares.tagged_context import TaggedContextMiddleware
 
 __all__ = [
@@ -25,5 +26,6 @@ __all__ = [
     "PlanContextMiddleware",
     "ReflectionMiddleware",
     "SequentialToolCallMiddleware",
+    "SkillSelectionMiddleware",
     "TaggedContextMiddleware",
 ]

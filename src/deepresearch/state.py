@@ -15,6 +15,7 @@ from langchain_core.messages import HumanMessage
 
 from deepresearch.context.types import GovernanceState, TaggedContextState
 from deepresearch.memory.types import MemoryRuntimeState
+from deepresearch.skill.types import SkillRuntimeState
 
 
 class SearchRecord(TypedDict):
@@ -189,6 +190,18 @@ def merge_memory_runtime(
     return cast(MemoryRuntimeState, merged)
 
 
+def merge_skill_runtime(
+    current: SkillRuntimeState | None,
+    incoming: SkillRuntimeState | None,
+) -> SkillRuntimeState:
+    """Merge partial skill patches while replacing selection lists explicitly."""
+
+    merged = deepcopy(dict(current or {}))
+    for key, value in dict(incoming or {}).items():
+        merged[key] = deepcopy(value)
+    return cast(SkillRuntimeState, merged)
+
+
 def create_initial_memory_state(namespace: str = "default") -> MemoryRuntimeState:
     """Create the checkpoint-safe runtime view for long-term memory."""
 
@@ -202,6 +215,23 @@ def create_initial_memory_state(namespace: str = "default") -> MemoryRuntimeStat
         "pending_write_count": 0,
         "last_error": None,
         "last_processed_run": None,
+    }
+
+
+def create_initial_skill_state() -> SkillRuntimeState:
+    """Create the complete checkpoint-safe skill namespace for a new run."""
+
+    return {
+        "query_hash": None,
+        "catalog_hash": None,
+        "selected": [],
+        "dropped": [],
+        "selection_count": 0,
+        "injection_count": 0,
+        "injected_tokens": 0,
+        "aligned_tool_calls": 0,
+        "completed_recorded": False,
+        "last_error": None,
     }
 
 
@@ -280,6 +310,7 @@ class ResearchState(AgentState):
     governance: Annotated[GovernanceState, merge_governance]
     tagged_context: Annotated[TaggedContextState | None, merge_tagged_context]
     memory: Annotated[MemoryRuntimeState, merge_memory_runtime]
+    skills: Annotated[SkillRuntimeState, merge_skill_runtime]
 
 
 def create_initial_state(
@@ -304,4 +335,5 @@ def create_initial_state(
         "governance": create_initial_governance_state(),
         "tagged_context": None,
         "memory": create_initial_memory_state(memory_namespace),
+        "skills": create_initial_skill_state(),
     }
