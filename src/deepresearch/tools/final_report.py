@@ -81,17 +81,18 @@ def write_final_report_tool(
     except ValueError as exc:
         return f"Final report rejected: {exc}"
 
-    validated_source_count = len(
-        {url.strip() for url in used_source_urls if url.strip()}
+    validated_source_urls = list(
+        dict.fromkeys(url.strip() for url in used_source_urls if url.strip())
     )
     return Command(
         update={
             "final_report": final_report,
+            "final_report_source_urls": validated_source_urls,
             "messages": [
                 ToolMessage(
                     content=(
                         "Final Markdown report saved to state with "
-                        f"{validated_source_count} validated sources."
+                        f"{len(validated_source_urls)} validated sources."
                     ),
                     tool_call_id=runtime.tool_call_id or "final-report-tool-call",
                 )

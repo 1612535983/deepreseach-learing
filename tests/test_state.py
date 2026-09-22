@@ -3,6 +3,7 @@ from deepresearch.state import (
     append_search_records,
     create_initial_state,
     merge_final_report,
+    merge_final_report_sources,
     merge_sources,
     merge_tagged_context,
 )
@@ -69,6 +70,14 @@ def test_sources_are_deduplicated_by_url() -> None:
 def test_final_report_uses_latest_non_null_value() -> None:
     assert merge_final_report("old report", None) == "old report"
     assert merge_final_report("old report", "new report") == "new report"
+
+
+def test_final_report_sources_replace_only_on_explicit_update() -> None:
+    assert merge_final_report_sources(["old"], None) == ["old"]
+    assert merge_final_report_sources(["old"], ["new", "new-2"]) == [
+        "new",
+        "new-2",
+    ]
 
 
 def test_tagged_context_uses_latest_detached_snapshot() -> None:

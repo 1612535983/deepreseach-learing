@@ -138,6 +138,15 @@ def merge_final_report(current: str | None, incoming: str | None) -> str | None:
     return incoming if incoming is not None else current
 
 
+def merge_final_report_sources(
+    current: list[str] | None,
+    incoming: list[str] | None,
+) -> list[str]:
+    """Replace citation provenance only when a report Tool supplies it."""
+
+    return list(incoming) if incoming is not None else list(current or [])
+
+
 def merge_plan(
     current: ResearchPlan | None,
     incoming: ResearchPlan | None,
@@ -358,6 +367,7 @@ class ResearchState(AgentState):
     reflection_attempts: NotRequired[int]
     research_gaps: NotRequired[list[str]]
     final_report: Annotated[str | None, merge_final_report]
+    final_report_source_urls: Annotated[list[str], merge_final_report_sources]
     governance: Annotated[GovernanceState, merge_governance]
     tagged_context: Annotated[TaggedContextState | None, merge_tagged_context]
     memory: Annotated[MemoryRuntimeState, merge_memory_runtime]
@@ -384,6 +394,7 @@ def create_initial_state(
         "reflection_attempts": 0,
         "research_gaps": [],
         "final_report": None,
+        "final_report_source_urls": [],
         "governance": create_initial_governance_state(),
         "tagged_context": None,
         "memory": create_initial_memory_state(memory_namespace),

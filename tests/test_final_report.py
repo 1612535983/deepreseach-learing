@@ -108,4 +108,5 @@ def test_write_final_report_updates_state_through_agent_graph() -> None:
     assert final_state["final_report"].startswith("# 研究报告\n\n## 结论")
     assert SOURCE_A in final_state["final_report"]
     assert SOURCE_B in final_state["final_report"]
+    assert final_state["final_report_source_urls"] == [SOURCE_A, SOURCE_B]
     assert final_state["research_gaps"] == []
