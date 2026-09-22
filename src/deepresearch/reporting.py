@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from deepresearch.events import ResearchEvent
 from deepresearch.state import ResearchState
@@ -23,6 +25,76 @@ class ResearchStats:
     total_page_reads: int
     successful_page_reads: int
     failed_page_reads: int
+
+
+def _mapping(value: object) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _non_negative_int(value: object) -> int:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return max(0, value)
+    return 0
+
+
+def _ratio(value: object) -> float:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return max(0.0, float(value))
+    return 0.0
+
+
+def format_governance_summary(state: Mapping[str, Any]) -> str:
+    """Render checkpoint-safe context measurements without exposing ledgers."""
+
+    governance = _mapping(state.get("governance"))
+    context = _mapping(governance.get("context"))
+    if not context:
+        return "上下文治理：暂无记录"
+
+    budget = _mapping(context.get("budget"))
+    usage = _mapping(context.get("cumulative_usage"))
+    model_name = context.get("model_name")
+    if not isinstance(model_name, str) or not model_name.strip():
+        model_name = "未知"
+
+    pending_value = context.get("pending_stages")
+    if isinstance(pending_value, (list, tuple)):
+        pending_stages = ", ".join(
+            str(stage) for stage in pending_value if str(stage).strip()
+        )
+    else:
+        pending_stages = ""
+
+    window_source = budget.get("window_source")
+    if not isinstance(window_source, str) or not window_source:
+        window_source = "unknown"
+    token_count_method = budget.get("token_count_method")
+    if not isinstance(token_count_method, str) or not token_count_method:
+        token_count_method = "unknown"
+
+    return "\n".join(
+        [
+            "上下文治理：",
+            f"模型名称：{model_name}",
+            (
+                f"上下文窗口：{_non_negative_int(budget.get('window_tokens')):,} "
+                f"Token（来源：{window_source}）"
+            ),
+            (
+                f"当前上下文：{_non_negative_int(budget.get('current_tokens')):,} "
+                f"Token（统计：{token_count_method}）"
+            ),
+            f"上下文占用：{_ratio(budget.get('utilization_ratio')):.2%}",
+            (
+                f"累计 Token：{_non_negative_int(usage.get('total_tokens')):,}"
+                f"（输入 {_non_negative_int(usage.get('input_tokens')):,} / "
+                f"输出 {_non_negative_int(usage.get('output_tokens')):,}）"
+            ),
+            f"模型调用次数：{_non_negative_int(context.get('model_call_count')):,}",
+            f"待处理阶段：{pending_stages or '无'}",
+            f"硬限制：{'是' if context.get('hard_limit_reached') is True else '否'}",
+        ]
+    )
 
 
 def calculate_stats(state: ResearchState) -> ResearchStats:
@@ -143,6 +215,8 @@ def format_trace(state: ResearchState) -> str:
         lines.append("（无）")
     else:
         lines.extend(f"- {gap}" for gap in research_gaps)
+
+    lines.extend(["", *format_governance_summary(state).splitlines()])
 
     lines.extend(
         [

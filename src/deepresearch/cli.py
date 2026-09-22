@@ -17,6 +17,7 @@ from deepresearch.agent import (
 from deepresearch.checkpointing import get_checkpoint_tuple, open_sqlite_checkpointer
 from deepresearch.events import ResearchEvent
 from deepresearch.reporting import (
+    format_governance_summary,
     format_research_event,
     format_trace,
     save_markdown_report,
@@ -43,20 +44,21 @@ def _checkpoint_summary(thread_id: str) -> str:
         if isinstance(step, dict) and step.get("status") == "completed"
     )
     metadata = checkpoint.metadata
-    return "\n".join(
-        [
-            f"任务 ID：{thread_id}",
-            f"研究问题：{state.get('research_question') or '未记录'}",
-            f"Checkpoint 时间：{checkpoint.checkpoint.get('ts') or '未知'}",
-            f"Graph 步骤：{metadata.get('step', '未知')}",
-            f"计划进度：{completed_steps}/{len(steps)}",
-            f"搜索次数：{len(state.get('search_records', []))}",
-            f"网页读取次数：{len(state.get('page_records', []))}",
-            f"来源数量：{len(state.get('sources', []))}",
-            f"证据数量：{len(state.get('observations', []))}",
-            f"最终报告：{'已生成' if state.get('final_report') else '未生成'}",
-        ]
-    )
+    lines = [
+        f"任务 ID：{thread_id}",
+        f"研究问题：{state.get('research_question') or '未记录'}",
+        f"Checkpoint 时间：{checkpoint.checkpoint.get('ts') or '未知'}",
+        f"Graph 步骤：{metadata.get('step', '未知')}",
+        f"计划进度：{completed_steps}/{len(steps)}",
+        f"搜索次数：{len(state.get('search_records', []))}",
+        f"网页读取次数：{len(state.get('page_records', []))}",
+        f"来源数量：{len(state.get('sources', []))}",
+        f"证据数量：{len(state.get('observations', []))}",
+        f"最终报告：{'已生成' if state.get('final_report') else '未生成'}",
+        "",
+        *format_governance_summary(state).splitlines(),
+    ]
+    return "\n".join(lines)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -78,7 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--show-trace",
         action="store_true",
-        help="显示由程序统计的搜索、网页读取和来源记录",
+        help="显示由程序统计的研究记录和上下文治理指标",
     )
     run.add_argument(
         "--output",
@@ -103,7 +105,7 @@ def build_parser() -> argparse.ArgumentParser:
     resume.add_argument(
         "--show-trace",
         action="store_true",
-        help="显示恢复后的搜索、网页读取和来源记录",
+        help="显示恢复后的研究记录和上下文治理指标",
     )
     resume.add_argument(
         "--output",

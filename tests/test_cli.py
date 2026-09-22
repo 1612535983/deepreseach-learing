@@ -156,6 +156,13 @@ def test_inspect_reads_sqlite_without_model(monkeypatch, capsys, tmp_path) -> No
     assert "研究问题：检查问题" in output
     assert "Graph 步骤：" in output
     assert "最终报告：未生成" in output
+    assert "上下文治理：" in output
+    assert "上下文窗口：32,768 Token（来源：fallback）" in output
+    assert "当前上下文：" in output
+    assert "上下文占用：" in output
+    assert "累计 Token：0（输入 0 / 输出 0）" in output
+    assert "模型调用次数：1" in output
+    assert "待处理阶段：无" in output
 
 
 def test_inspect_reports_missing_thread(monkeypatch, capsys, tmp_path) -> None:  # noqa: ANN001

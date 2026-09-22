@@ -2,7 +2,8 @@
 
 这个项目不是直接复制 Poirot，而是沿着 Poirot 的核心执行链逐层重建：先让最小 Agent 跑通，再按 Git 阶段加入 Tool、Middleware、State、Skill 和其他基础设施。
 
-当前版本是 **阶段 8B：接入 SQLite 持久化 Checkpointer 的研究 Agent**：
+当前版本是 **阶段 9A：具备上下文治理观测能力的研究 Agent**。这个阶段只测量、判断和展示，
+暂时不会删除、外化或压缩消息：
 
 ```text
 命令行问题
@@ -20,6 +21,10 @@ create_agent() 编译 Agent Graph
     ├── reflection_attempts / research_gaps
     ├── sources / observations
     ├── final_report
+    ├── governance.context
+    │   ├── 当前 Token / 上下文窗口 / 占用比例
+    │   ├── 累计 Token / 模型调用次数
+    │   └── pending_stages / hard_limit_reached
     └── SQLite Checkpointer（按 thread_id 持久化快照）
     ↓
 PlanContextMiddleware 选择性注入计划进度
@@ -193,12 +198,14 @@ uv run deepresearch resume research-001 --stream
 uv run deepresearch inspect research-001
 ```
 
-`inspect` 会显示原问题、Checkpoint 时间、Graph 步骤、计划进度以及搜索、来源、证据和报告
-数量。同步 Graph 使用 `SqliteSaver`，异步 Graph 使用 `AsyncSqliteSaver`。不要让两个进程同时
-用同一个 `thread_id` 执行；不同任务应使用不同 ID。
+`inspect` 会显示原问题、Checkpoint 时间、Graph 步骤、计划进度、研究统计，以及保存在
+Checkpoint State 中的模型名称、上下文窗口、当前 Token、占用比例、累计 Token、模型调用
+次数和 `pending_stages`。同步 Graph 使用 `SqliteSaver`，异步 Graph 使用
+`AsyncSqliteSaver`。不要让两个进程同时用同一个 `thread_id` 执行；不同任务应使用不同 ID。
 
 `--show-trace` 中的统计不调用 LLM；它直接读取 `search_records`、`page_records`、
-`sources` 和 `observations`，用于区分真实执行记录与模型生成的自然语言说明。
+`sources`、`observations` 和 `governance.context`，用于区分真实执行记录与模型生成的
+自然语言说明。
 
 `run` 模式会把 `web_search` 和 `read_page` 注册给真实模型；模型可以先搜索，
 再选择重要来源读取正文。`write_research_plan` 和 `update_plan_step` 负责创建并推进计划。
@@ -210,6 +217,9 @@ Plan 和 `current_step_id` 的 Tool 逐轮执行，避免多个 `Command` 同时
 `ReflectionMiddleware` 在模型不再调用 Tool、准备结束时读取 State，检查计划是否完成、
 来源和 Observation 是否达到最小数量、是否成功读取过网页正文。检查不调用额外 LLM；
 如果不满足，会把缺口交给下一轮模型，但最多回跳 2 次，避免无限循环。
+`ContextGovernanceMiddleware` 在每次模型调用后统计当前消息 Token、识别模型上下文窗口、
+累计供应商返回的 Token usage，并按 P1～P5 阈值写入 `governance.context`。当前阶段仅记录
+`pending_stages`，不会执行外化、压缩或强制收尾。
 `demo` 模式仍使用无工具的 Fake Model，保证在没有网络和 API Key 时也能验证基础链路。
 
 `.env` 已被 `.gitignore` 排除，真实 API Key 不会进入 Git。
@@ -232,6 +242,9 @@ Plan 和 `current_step_id` 的 Tool 逐轮执行，避免多个 `Command` 同时
 - **Checkpointer**：在 Graph 执行步骤结束后自动保存 State 快照；`thread_id` 用来区分任务。
 - **Checkpoint**：某一执行时刻的 State 和 Graph 运行位置；恢复时不需要应用代码手动重放每个 Tool。
 - **SQLite**：单文件关系型数据库。本项目用它持久化 Checkpoint，不用额外启动数据库服务。
+- **Token**：模型处理文本时使用的计量单位，不等同于字符数；当前优先使用模型计数器，不可用时采用字符估算。
+- **上下文窗口**：一次模型请求可容纳的 Token 上限。当前按显式配置、模型属性、名称映射、默认值的顺序识别，并记录识别来源。
+- **pending_stages**：当前占用比例已经触发但尚未真正执行的 P1～P5 治理阶段。
 
 ## 分阶段复现路线
 
@@ -247,11 +260,15 @@ Plan 和 `current_step_id` 的 Tool 逐轮执行，避免多个 `Command` 同时
 8. **阶段 6B（已完成）— 最终报告**：校验报告引用，保存到 `final_report`，并由 CLI 导出 `.md` 文件。
 9. **阶段 7（已完成）— 流式输出**：把 `stream()/astream()` 更新转换成统一事件，并在 CLI 实时显示。
 10. **阶段 8A（已完成）— 内存 Checkpointer**：把 Checkpointer 装入 Graph，通过 config 的 `thread_id` 自动保存和隔离 State。
-11. **阶段 8B（当前）— SQLite Checkpointer**：让 Checkpoint 跨进程持久化，并增加 `resume` 和 `inspect` 命令。
-12. **阶段 9 — 上下文管理**：选择当前模型真正需要的消息、计划、证据和 Token 预算。
-13. **阶段 10 — 记忆系统**：区分任务短期记忆和可跨任务检索的长期记忆。
-14. **阶段 11 — Skill**：在上下文预算内加载“如何检索、核验来源、写报告”的过程知识。
-15. **后续阶段**：错误恢复与预算、评估、MCP、Sandbox、API/前端，最后再考虑多 Agent。
+11. **阶段 8B（已完成）— SQLite Checkpointer**：让 Checkpoint 跨进程持久化，并增加 `resume` 和 `inspect` 命令。
+12. **阶段 9A（当前）— Context Governance 观测层**：增加治理 State、Token 统计、模型窗口识别、阈值判断、Middleware 记录，以及 Trace/inspect 展示；暂不修改消息。
+13. **阶段 9B — Tagged Context**：标记消息和上下文片段的来源、类别与保留优先级。
+14. **阶段 9C — P1 Tool 结果外化**：把大体积 Tool 结果保存到消息之外，只保留引用和摘要。
+15. **阶段 9D — P4 Snapshot 与摘要压缩**：保存压缩前快照，并把较旧上下文替换成可恢复摘要。
+16. **阶段 9E — P5 强制收尾**：高占用时停止继续调用 Tool，引导模型生成最终产物。
+17. **阶段 10 — 记忆系统**：区分任务短期记忆和可跨任务检索的长期记忆。
+18. **阶段 11 — Skill**：在上下文预算内加载“如何检索、核验来源、写报告”的过程知识。
+19. **后续阶段**：错误恢复与预算、评估、MCP、Sandbox、API/前端，最后再考虑多 Agent。
 
 ## Git 管理建议
 
@@ -281,6 +298,7 @@ git commit -m "feat: add web search tool"
 | `src/deepresearch/checkpointing.py` | Checkpoint 配置层 | 创建 Saver、生成 `thread_id` 和运行 config |
 | `src/deepresearch/events.py` | Agent 事件协议 | 把 LangGraph 原始更新转换成稳定的 `ResearchEvent` |
 | `src/deepresearch/state.py` | `agents/state/types.py` + `reducers.py` | 定义共享研究状态和合并规则 |
+| `src/deepresearch/context/` | 上下文治理策略层 | 定义治理类型、Token 统计、窗口识别和 P1～P5 阈值判断 |
 | `src/deepresearch/tools/web_search.py` | `agents/agent_tools/builtin/ddg_search.py` | 执行网页搜索 |
 | `src/deepresearch/tools/read_page.py` | 网页读取类 Tool | 安全下载并提取网页正文 |
 | `src/deepresearch/tools/research_plan.py` | Todo/计划类状态 Tool | 创建计划并推进步骤状态 |
@@ -289,6 +307,7 @@ git commit -m "feat: add web search tool"
 | `src/deepresearch/middlewares/plan_context.py` | 计划上下文 Middleware | 选择性向模型暴露计划进度 |
 | `src/deepresearch/middlewares/sequential_tools.py` | Tool 调度 Middleware | 禁止并行 Tool Call，避免 State 并发写冲突 |
 | `src/deepresearch/middlewares/reflection.py` | 反思/质量控制 Middleware | 在结束前检查缺口，并有限次回到模型 |
+| `src/deepresearch/middlewares/context_governance.py` | 上下文治理 Middleware | 每次模型调用后把测量和阈值判断结果写入 State |
 | `src/deepresearch/reporting.py` | 输出层 | 显示 Trace，并把 `final_report` 写成 `.md` 文件 |
 | `build_agent()` | `agents/leader/factory.py` | 编译 Agent Graph |
 | `run_with_model()` | `agents/leader/agent.py` | 执行 Graph 并整理输出 |

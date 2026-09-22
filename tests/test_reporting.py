@@ -1,7 +1,12 @@
 import pytest
 from langchain_core.messages import HumanMessage
 
-from deepresearch.reporting import calculate_stats, format_trace, save_markdown_report
+from deepresearch.reporting import (
+    calculate_stats,
+    format_governance_summary,
+    format_trace,
+    save_markdown_report,
+)
 from deepresearch.state import ResearchState
 
 
@@ -110,6 +115,48 @@ def test_format_trace_includes_queries_errors_and_sources() -> None:
     assert "反思次数：1" in trace
     assert "step-2 尚未完成：核验资料" in trace
     assert "正式报告：未生成" in trace
+    assert "上下文治理：暂无记录" in trace
+
+
+def test_format_governance_summary_displays_recorded_metrics() -> None:
+    state = make_state()
+    state["governance"] = {
+        "context": {
+            "model_name": "deepseek-chat",
+            "budget": {
+                "current_tokens": 50_000,
+                "window_tokens": 1_048_576,
+                "utilization_ratio": 50_000 / 1_048_576,
+                "token_count_method": "char_estimate",
+                "window_source": "model_map",
+            },
+            "cumulative_usage": {
+                "input_tokens": 80_000,
+                "output_tokens": 8_000,
+                "total_tokens": 88_000,
+            },
+            "model_call_count": 7,
+            "pending_stages": ["P1", "P2"],
+            "hard_limit_reached": False,
+            "seen_message_usage": {},
+        }
+    }
+
+    summary = format_governance_summary(state)
+
+    assert "模型名称：deepseek-chat" in summary
+    assert "上下文窗口：1,048,576 Token（来源：model_map）" in summary
+    assert "当前上下文：50,000 Token（统计：char_estimate）" in summary
+    assert "上下文占用：4.77%" in summary
+    assert "累计 Token：88,000（输入 80,000 / 输出 8,000）" in summary
+    assert "模型调用次数：7" in summary
+    assert "待处理阶段：P1, P2" in summary
+    assert "硬限制：否" in summary
+    assert "seen_message_usage" not in summary
+
+
+def test_format_governance_summary_accepts_old_state() -> None:
+    assert format_governance_summary(make_state()) == "上下文治理：暂无记录"
 
 
 def test_save_markdown_report_writes_final_report(tmp_path) -> None:  # noqa: ANN001
