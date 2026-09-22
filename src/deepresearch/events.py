@@ -20,6 +20,7 @@ ResearchEventType = Literal[
     "skill_injected",
     "skill_metrics",
     "report_created",
+    "report_evaluated",
     "run_completed",
     "run_failed",
 ]
@@ -125,6 +126,7 @@ def events_from_update(update: object) -> list[ResearchEvent]:
             "research_gaps",
             "final_report",
             "skills",
+            "evaluation",
         }
         events.extend(
             _message_events(
@@ -263,6 +265,51 @@ def events_from_update(update: object) -> list[ResearchEvent]:
                         node,
                     )
                 )
+
+        evaluation = raw_patch.get("evaluation")
+        if isinstance(evaluation, dict):
+            report_evaluation = evaluation.get("report")
+            if isinstance(report_evaluation, dict):
+                status = report_evaluation.get("status")
+                if status in {"completed", "error"}:
+                    score = report_evaluation.get("composite_score")
+                    action = report_evaluation.get("recommended_action")
+                    if status == "completed":
+                        message = (
+                            f"报告概率评估完成：质量分 {float(score):.1%}，"
+                            f"建议 {action}"
+                            if isinstance(score, (int, float))
+                            else "报告概率评估完成"
+                        )
+                    else:
+                        message = "报告概率评估失败，研究流程已继续"
+                    events.append(
+                        ResearchEvent(
+                            "report_evaluated",
+                            message,
+                            {
+                                "status": status,
+                                "mode": report_evaluation.get("mode"),
+                                "composite_score": score,
+                                "recommended_action": action,
+                                "runtime_action": report_evaluation.get(
+                                    "runtime_action"
+                                ),
+                                "latency_ms": int(
+                                    report_evaluation.get("latency_ms") or 0
+                                ),
+                                "input_tokens": int(
+                                    report_evaluation.get("input_tokens") or 0
+                                ),
+                                "output_tokens": int(
+                                    report_evaluation.get("output_tokens") or 0
+                                ),
+                                "cost_usd": report_evaluation.get("cost_usd"),
+                                "error": report_evaluation.get("last_error"),
+                            },
+                            node,
+                        )
+                    )
 
         final_report = raw_patch.get("final_report")
         if isinstance(final_report, str) and final_report:

@@ -29,6 +29,7 @@ from deepresearch.skill.manager import BUILTIN_SKILLS_DIR, SkillManager
 from deepresearch.skill.parser import discover_skills
 from deepresearch.skill.types import SkillRecord
 from deepresearch.reporting import (
+    format_evaluation_summary,
     format_governance_summary,
     format_memory_summary,
     format_research_event,
@@ -75,6 +76,8 @@ def _checkpoint_summary(thread_id: str) -> str:
         *format_memory_summary(state).splitlines(),
         "",
         *format_skill_summary(state).splitlines(),
+        "",
+        *format_evaluation_summary(state).splitlines(),
         "",
         *_memory_store_summary().splitlines(),
     ]

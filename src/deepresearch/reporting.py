@@ -217,6 +217,77 @@ def format_skill_summary(state: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def format_evaluation_summary(state: Mapping[str, Any]) -> str:
+    """Render report probabilities and runtime cost without report contents."""
+
+    report = _mapping(_mapping(state.get("evaluation")).get("report"))
+    status = str(report.get("status") or "not_run")
+    if status == "not_run" or not report:
+        return "Jev 报告评估：未执行"
+
+    score = report.get("composite_score")
+    score_text = (
+        f"{float(score):.1%}"
+        if isinstance(score, (int, float)) and not isinstance(score, bool)
+        else "未知"
+    )
+    cost = report.get("cost_usd")
+    cost_text = (
+        f"${float(cost):.6f}"
+        if isinstance(cost, (int, float)) and not isinstance(cost, bool)
+        else "未提供"
+    )
+    lines = [
+        "Jev 报告评估：",
+        f"状态：{status}；模式：{report.get('mode') or 'unknown'}",
+        f"Provider/模型：{report.get('provider') or '未知'} / {report.get('model') or '未知'}",
+        f"综合质量分：{score_text}",
+        f"建议动作：{report.get('recommended_action') or '无'}",
+        f"实际动作：{report.get('runtime_action') or '无'}",
+        (
+            f"调用统计：{_non_negative_int(report.get('latency_ms'))} ms；"
+            f"输入 {_non_negative_int(report.get('input_tokens'))} Token；"
+            f"输出 {_non_negative_int(report.get('output_tokens'))} Token；"
+            f"成本 {cost_text}"
+        ),
+        (
+            f"执行次数：{_non_negative_int(report.get('evaluation_count'))}；"
+            f"Gate 次数：{_non_negative_int(report.get('gate_attempts'))}"
+        ),
+    ]
+    answer_labels = {
+        "answer_relevance": "回答相关",
+        "evidence_support": "证据支持",
+        "citation_coverage": "引用充分",
+        "evidence_sufficient": "证据足够",
+        "continue_research": "继续研究",
+        "source_quality": "来源质量",
+    }
+    answers = _mapping(report.get("answers"))
+    if answers:
+        lines.append("概率与评分：")
+        for name, label in answer_labels.items():
+            answer = _mapping(answers.get(name))
+            value = answer.get("value")
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                continue
+            confidence = answer.get("confidence")
+            suffix = (
+                f"（置信度 {float(confidence):.1%}）"
+                if isinstance(confidence, (int, float))
+                and not isinstance(confidence, bool)
+                else ""
+            )
+            if answer.get("type") == "score":
+                lines.append(f"- {label}：{float(value):.2f}{suffix}")
+            else:
+                lines.append(f"- {label}：{float(value):.1%}{suffix}")
+    last_error = report.get("last_error")
+    if isinstance(last_error, str) and last_error:
+        lines.append(f"最近评估错误：{last_error}")
+    return "\n".join(lines)
+
+
 def calculate_stats(state: ResearchState) -> ResearchStats:
     """Calculate mutually understandable counters from a completed state."""
 
@@ -287,6 +358,7 @@ def format_research_event(event: ResearchEvent) -> str:
         "skill_injected": "Skill",
         "skill_metrics": "Skill",
         "report_created": "报告",
+        "report_evaluated": "评估",
         "run_completed": "完成",
         "run_failed": "失败",
     }
@@ -342,6 +414,7 @@ def format_trace(state: ResearchState) -> str:
     lines.extend(["", *format_governance_summary(state).splitlines()])
     lines.extend(["", *format_memory_summary(state).splitlines()])
     lines.extend(["", *format_skill_summary(state).splitlines()])
+    lines.extend(["", *format_evaluation_summary(state).splitlines()])
 
     lines.extend(
         [

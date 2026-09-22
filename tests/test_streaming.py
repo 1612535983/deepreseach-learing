@@ -199,3 +199,58 @@ def test_skill_selection_reset_does_not_emit_injection_event() -> None:
     )
 
     assert [event.event_type for event in events] == ["skill_selected"]
+
+
+def test_report_evaluation_emits_safe_cost_and_quality_event() -> None:
+    secret_report = "do not expose report body"
+    update = {
+        "ReportEvaluationMiddleware.after_model": {
+            "evaluation": {
+                "report": {
+                    "status": "completed",
+                    "mode": "shadow",
+                    "composite_score": 0.8123,
+                    "recommended_action": "pass",
+                    "runtime_action": "observed",
+                    "latency_ms": 245,
+                    "input_tokens": 432,
+                    "output_tokens": 12,
+                    "cost_usd": 0.0042,
+                }
+            },
+            "final_report": secret_report,
+        }
+    }
+
+    events = events_from_update(update)
+
+    assert [event.event_type for event in events] == [
+        "report_evaluated",
+        "report_created",
+    ]
+    evaluation = events[0]
+    assert evaluation.data["composite_score"] == 0.8123
+    assert evaluation.data["latency_ms"] == 245
+    assert evaluation.data["cost_usd"] == 0.0042
+    assert secret_report not in repr(evaluation)
+
+
+def test_report_evaluation_error_event_does_not_fail_stream() -> None:
+    events = events_from_update(
+        {
+            "evaluation": {
+                "evaluation": {
+                    "report": {
+                        "status": "error",
+                        "mode": "shadow",
+                        "runtime_action": "fail_open",
+                        "last_error": "TimeoutError: evaluation failed",
+                    }
+                }
+            }
+        }
+    )
+
+    assert len(events) == 1
+    assert events[0].event_type == "report_evaluated"
+    assert events[0].data["error"] == "TimeoutError: evaluation failed"

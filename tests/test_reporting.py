@@ -3,6 +3,7 @@ from langchain_core.messages import HumanMessage
 
 from deepresearch.reporting import (
     calculate_stats,
+    format_evaluation_summary,
     format_governance_summary,
     format_memory_summary,
     format_skill_summary,
@@ -118,6 +119,48 @@ def test_format_trace_includes_queries_errors_and_sources() -> None:
     assert "step-2 尚未完成：核验资料" in trace
     assert "正式报告：未生成" in trace
     assert "上下文治理：暂无记录" in trace
+    assert "Jev 报告评估：未执行" in trace
+
+
+def test_format_evaluation_summary_displays_probabilities_and_cost() -> None:
+    state = make_state()
+    state["evaluation"] = {
+        "report": {
+            "status": "completed",
+            "mode": "shadow",
+            "provider": "jev",
+            "model": "jev-latest",
+            "composite_score": 0.81,
+            "recommended_action": "pass",
+            "runtime_action": "observed",
+            "evaluation_count": 1,
+            "gate_attempts": 0,
+            "latency_ms": 321,
+            "input_tokens": 500,
+            "output_tokens": 12,
+            "cost_usd": 0.003,
+            "answers": {
+                "answer_relevance": {"type": "noul", "value": 0.9},
+                "evidence_support": {"type": "noul", "value": 0.82},
+                "citation_coverage": {"type": "noul", "value": 0.74},
+                "evidence_sufficient": {"type": "noul", "value": 0.8},
+                "continue_research": {"type": "noul", "value": 0.1},
+                "source_quality": {
+                    "type": "score",
+                    "value": 2.5,
+                    "confidence": 0.88,
+                },
+            },
+        }
+    }
+
+    summary = format_evaluation_summary(state)
+
+    assert "状态：completed；模式：shadow" in summary
+    assert "综合质量分：81.0%" in summary
+    assert "回答相关：90.0%" in summary
+    assert "来源质量：2.50（置信度 88.0%）" in summary
+    assert "调用统计：321 ms；输入 500 Token；输出 12 Token；成本 $0.003000" in summary
 
 
 def test_format_governance_summary_displays_recorded_metrics() -> None:
