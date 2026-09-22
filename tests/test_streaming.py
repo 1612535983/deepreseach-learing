@@ -141,3 +141,61 @@ def test_astream_with_model_delivers_async_events() -> None:
         "run_started",
         "run_completed",
     ]
+
+
+def test_skill_updates_emit_safe_progress_events() -> None:
+    update = {
+        "SkillSelectionMiddleware.before_model": {
+            "skills": {
+                "selected": [
+                    {
+                        "name": "source-verification",
+                        "skill_id": "source-verification__abc",
+                    }
+                ],
+                "selection_count": 1,
+            }
+        },
+        "SkillInjectionMiddleware.before_model": {
+            "skills": {
+                "injection_count": 1,
+                "injected_tokens": 120,
+                "dropped": [],
+                "render_signature": "render-1",
+            }
+        },
+        "SkillMetricsMiddleware.after_agent": {
+            "skills": {
+                "aligned_tool_calls": 2,
+                "completed_recorded": True,
+            }
+        },
+    }
+
+    events = events_from_update(update)
+
+    assert [event.event_type for event in events] == [
+        "skill_selected",
+        "skill_injected",
+        "skill_metrics",
+    ]
+    assert events[0].data["names"] == ["source-verification"]
+    assert events[1].data["token_count"] == 120
+    assert events[2].data["aligned_tool_calls"] == 2
+
+
+def test_skill_selection_reset_does_not_emit_injection_event() -> None:
+    events = events_from_update(
+        {
+            "selection": {
+                "skills": {
+                    "selected": [],
+                    "selection_count": 1,
+                    "injection_count": 0,
+                    "render_signature": None,
+                }
+            }
+        }
+    )
+
+    assert [event.event_type for event in events] == ["skill_selected"]

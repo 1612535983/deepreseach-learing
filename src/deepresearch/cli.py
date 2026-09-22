@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import sqlite3
 from collections.abc import Sequence
+from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
@@ -22,10 +24,15 @@ from deepresearch.memory.bootstrap import get_memory_provider
 from deepresearch.memory.config import MemoryConfig
 from deepresearch.memory.schema import MemoryType
 from deepresearch.memory.types import MemoryFilter
+from deepresearch.skill.config import SkillConfig
+from deepresearch.skill.manager import BUILTIN_SKILLS_DIR, SkillManager
+from deepresearch.skill.parser import discover_skills
+from deepresearch.skill.types import SkillRecord
 from deepresearch.reporting import (
     format_governance_summary,
     format_memory_summary,
     format_research_event,
+    format_skill_summary,
     format_trace,
     save_markdown_report,
 )
@@ -66,6 +73,8 @@ def _checkpoint_summary(thread_id: str) -> str:
         *format_governance_summary(state).splitlines(),
         "",
         *format_memory_summary(state).splitlines(),
+        "",
+        *format_skill_summary(state).splitlines(),
         "",
         *_memory_store_summary().splitlines(),
     ]
@@ -138,6 +147,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--thread-id",
         help="指定持久化任务 ID；省略时自动生成",
     )
+    run.add_argument(
+        "--skill",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="按名称强制选择 Skill；可重复传入",
+    )
 
     resume = subparsers.add_parser(
         "resume",
@@ -165,7 +181,119 @@ def build_parser() -> argparse.ArgumentParser:
         help="查看持久化任务摘要，不调用模型",
     )
     inspect.add_argument("thread_id", help="要查看的任务 ID")
+
+    skills = subparsers.add_parser(
+        "skills",
+        help="验证、查看和管理本地 Skill 目录",
+    )
+    skill_commands = skills.add_subparsers(dest="skill_command", required=True)
+    skill_commands.add_parser("list", help="列出当前激活的 Skill 版本")
+    show = skill_commands.add_parser("show", help="查看 Skill 元数据与正文")
+    show.add_argument("identifier", help="Skill 名称或 skill_id")
+    history = skill_commands.add_parser("history", help="查看 Skill 版本历史")
+    history.add_argument("name", help="Skill 名称")
+    validate = skill_commands.add_parser("validate", help="只校验，不写入仓库")
+    validate.add_argument("paths", nargs="*", help="待扫描目录；默认读取配置")
+    for action in ("enable", "disable"):
+        command = skill_commands.add_parser(action, help=f"{action} Skill 版本")
+        command.add_argument("identifier", help="Skill 名称或 skill_id")
+    rollback = skill_commands.add_parser("rollback", help="切换激活版本")
+    rollback.add_argument("skill_id", help="目标历史版本的 skill_id")
     return parser
+
+
+def _cli_skill_config() -> SkillConfig:
+    load_dotenv()
+    config = SkillConfig.from_env()
+    return config if config.enabled else replace(config, use="default")
+
+
+def _resolve_skill(manager: SkillManager, identifier: str) -> SkillRecord:
+    record = manager.store.get(identifier) or manager.store.get_active(identifier)
+    if record is None:
+        raise ValueError(f"找不到 Skill：{identifier}")
+    return record
+
+
+def _skill_record_line(record: SkillRecord) -> str:
+    status = "enabled" if record.enabled else "disabled"
+    return (
+        f"{record.name} [{record.skill_id}] v{record.version} {status} "
+        f"origin={record.lineage.origin} selections={record.total_selections} "
+        f"injections={record.total_injections} "
+        f"completion={record.completion_rate:.1%}"
+    )
+
+
+def _validate_skills(args: argparse.Namespace) -> int:
+    config = _cli_skill_config()
+    requested = tuple(Path(path) for path in args.paths)
+    sources: list[tuple[tuple[str | Path, ...], str]] = []
+    if requested:
+        sources.append((requested, "IMPORTED"))
+    else:
+        if config.include_builtin and BUILTIN_SKILLS_DIR.exists():
+            sources.append(((BUILTIN_SKILLS_DIR,), "BUILTIN"))
+        sources.append((config.skill_dirs, "IMPORTED"))
+    valid = 0
+    invalid = 0
+    for directories, origin in sources:
+        result = discover_skills(
+            directories,
+            origin=origin,  # type: ignore[arg-type]
+            max_file_chars=config.max_file_chars,
+        )
+        for parsed in result.skills:
+            print(f"[有效] {parsed.record.name}：{parsed.record.source_path}")
+            valid += 1
+        for error in result.errors:
+            print(f"[无效] {error.path}：{error.error}")
+            invalid += 1
+    print(f"校验完成：{valid} 个有效，{invalid} 个无效")
+    return 1 if invalid else 0
+
+
+def _manage_skills(args: argparse.Namespace) -> int:
+    if args.skill_command == "validate":
+        return _validate_skills(args)
+    manager = SkillManager(_cli_skill_config())
+    try:
+        manager.load_startup()
+        if args.skill_command == "list":
+            records = manager.list_skills()
+            if not records:
+                print("没有发现 Skill。")
+            for record in records:
+                print(_skill_record_line(record))
+            return 0
+        if args.skill_command == "history":
+            records = manager.store.get_versions(args.name)
+            if not records:
+                raise ValueError(f"找不到 Skill：{args.name}")
+            for record in records:
+                marker = " * active" if record.is_active else ""
+                print(f"{_skill_record_line(record)}{marker}")
+            return 0
+        if args.skill_command == "rollback":
+            manager.store.rollback(args.skill_id)
+            print(f"已切换激活版本：{args.skill_id}")
+            return 0
+        record = _resolve_skill(manager, args.identifier)
+        if args.skill_command == "show":
+            print(_skill_record_line(record))
+            print(f"description: {record.description}")
+            print(f"tags: {', '.join(record.tags) or '-'}")
+            print(f"tools: {', '.join(record.allowed_tools) or '-'}")
+            print(f"source: {record.source_path}")
+            print()
+            print(manager.store.read_body(record.skill_id))
+            return 0
+        enabled = args.skill_command == "enable"
+        manager.store.set_enabled(record.skill_id, enabled)
+        print(f"已{'启用' if enabled else '停用'}：{record.name} [{record.skill_id}]")
+        return 0
+    finally:
+        manager.close()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -173,6 +301,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     output_path = None
 
     try:
+        if args.command == "skills":
+            return _manage_skills(args)
         if args.command == "inspect":
             print(_checkpoint_summary(args.thread_id))
             return 0
@@ -184,9 +314,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             else:
                 result = resume_question(args.thread_id)
         elif args.stream:
-            result = stream_question(args.question, _print_event, thread_id=args.thread_id)
+            result = stream_question(
+                args.question,
+                _print_event,
+                thread_id=args.thread_id,
+                skill_overrides=tuple(args.skill),
+            )
         else:
-            result = run_question(args.question, thread_id=args.thread_id)
+            result = run_question(
+                args.question,
+                thread_id=args.thread_id,
+                skill_overrides=tuple(args.skill),
+            )
         if args.command in {"run", "resume"} and args.output:
             output_path = save_markdown_report(result.state, args.output)
     except (ValueError, RuntimeError, OSError, sqlite3.DatabaseError) as exc:

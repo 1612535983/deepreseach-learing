@@ -174,6 +174,49 @@ def format_memory_summary(state: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def format_skill_summary(state: Mapping[str, Any]) -> str:
+    """Render selected immutable Skill references and runtime counters."""
+
+    skills = _mapping(state.get("skills"))
+    if not skills:
+        return "Skills：暂无运行记录"
+    selected_value = skills.get("selected")
+    selected = selected_value if isinstance(selected_value, list) else []
+    dropped_value = skills.get("dropped")
+    dropped = dropped_value if isinstance(dropped_value, list) else []
+    lines = [
+        "Skills：",
+        f"选择执行次数：{_non_negative_int(skills.get('selection_count')):,}",
+        f"选中数量：{len(selected):,}",
+        f"注入执行次数：{_non_negative_int(skills.get('injection_count')):,}",
+        f"注入 Token：{_non_negative_int(skills.get('injected_tokens')):,}",
+        f"预算丢弃数量：{len(dropped):,}",
+        f"匹配 Tool Call：{_non_negative_int(skills.get('aligned_tool_calls')):,}",
+        "选中版本：",
+    ]
+    if not selected:
+        lines.append("- 无")
+    for ref in selected:
+        if not isinstance(ref, Mapping):
+            continue
+        skill_id = str(ref.get("skill_id") or "unknown")
+        score = _ratio(ref.get("score"))
+        forced = "；强制" if ref.get("forced") is True else ""
+        lines.append(
+            f"- {ref.get('name') or 'unknown'} [{skill_id}]：{score:.4f}{forced}"
+        )
+    for ref in dropped:
+        if isinstance(ref, Mapping):
+            lines.append(
+                f"- 未注入 {ref.get('name') or 'unknown'}："
+                f"{ref.get('drop_reason') or 'unknown'}"
+            )
+    last_error = skills.get("last_error")
+    if isinstance(last_error, str) and last_error:
+        lines.append(f"最近 Skill 错误：{last_error}")
+    return "\n".join(lines)
+
+
 def calculate_stats(state: ResearchState) -> ResearchStats:
     """Calculate mutually understandable counters from a completed state."""
 
@@ -240,6 +283,9 @@ def format_research_event(event: ResearchEvent) -> str:
         "search_completed": "搜索",
         "page_read_completed": "读取",
         "reflection": "反思",
+        "skill_selected": "Skill",
+        "skill_injected": "Skill",
+        "skill_metrics": "Skill",
         "report_created": "报告",
         "run_completed": "完成",
         "run_failed": "失败",
@@ -295,6 +341,7 @@ def format_trace(state: ResearchState) -> str:
 
     lines.extend(["", *format_governance_summary(state).splitlines()])
     lines.extend(["", *format_memory_summary(state).splitlines()])
+    lines.extend(["", *format_skill_summary(state).splitlines()])
 
     lines.extend(
         [

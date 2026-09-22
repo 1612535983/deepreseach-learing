@@ -16,6 +16,9 @@ ResearchEventType = Literal[
     "search_completed",
     "page_read_completed",
     "reflection",
+    "skill_selected",
+    "skill_injected",
+    "skill_metrics",
     "report_created",
     "run_completed",
     "run_failed",
@@ -121,6 +124,7 @@ def events_from_update(update: object) -> list[ResearchEvent]:
             "page_records",
             "research_gaps",
             "final_report",
+            "skills",
         }
         events.extend(
             _message_events(
@@ -212,6 +216,53 @@ def events_from_update(update: object) -> list[ResearchEvent]:
                     node,
                 )
             )
+
+        skills = raw_patch.get("skills")
+        if isinstance(skills, dict):
+            selected = skills.get("selected")
+            if isinstance(selected, list):
+                names = [
+                    str(item.get("name"))
+                    for item in selected
+                    if isinstance(item, dict) and item.get("name")
+                ]
+                events.append(
+                    ResearchEvent(
+                        "skill_selected",
+                        (
+                            f"已选择 {len(names)} 个 Skill：{', '.join(names)}"
+                            if names
+                            else "本任务未匹配到 Skill"
+                        ),
+                        {"count": len(names), "names": names},
+                        node,
+                    )
+                )
+            if "injection_count" in skills and skills.get("render_signature"):
+                dropped = skills.get("dropped")
+                dropped_count = len(dropped) if isinstance(dropped, list) else 0
+                token_count = int(skills.get("injected_tokens") or 0)
+                events.append(
+                    ResearchEvent(
+                        "skill_injected",
+                        f"Skill 上下文已投影，占用 {token_count} Token",
+                        {
+                            "token_count": token_count,
+                            "dropped_count": dropped_count,
+                        },
+                        node,
+                    )
+                )
+            if skills.get("completed_recorded") is True:
+                aligned = int(skills.get("aligned_tool_calls") or 0)
+                events.append(
+                    ResearchEvent(
+                        "skill_metrics",
+                        f"Skill 效果已记录，匹配 Tool Call {aligned} 次",
+                        {"aligned_tool_calls": aligned},
+                        node,
+                    )
+                )
 
         final_report = raw_patch.get("final_report")
         if isinstance(final_report, str) and final_report:

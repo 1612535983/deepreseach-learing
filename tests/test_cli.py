@@ -95,6 +95,7 @@ def test_run_passes_thread_id_and_displays_it(monkeypatch, capsys) -> None:  # n
     def fake_run(question, **kwargs):  # noqa: ANN001, ANN003, ANN202
         received["question"] = question
         received["thread_id"] = kwargs.get("thread_id")
+        received["skill_overrides"] = kwargs.get("skill_overrides")  # type: ignore[assignment]
         return result
 
     monkeypatch.setattr("deepresearch.cli.run_question", fake_run)
@@ -108,6 +109,7 @@ def test_run_passes_thread_id_and_displays_it(monkeypatch, capsys) -> None:  # n
     assert received == {
         "question": "测试问题",
         "thread_id": "research-cli",
+        "skill_overrides": (),
     }
     assert "任务 ID：research-cli（已持久化到 SQLite）" in output
 
@@ -168,6 +170,8 @@ def test_inspect_reads_sqlite_without_model(monkeypatch, capsys, tmp_path) -> No
     assert "P5 收尾：未触发；重定向 0 次；拦截 0 个 Tool Call" in output
     assert "长期记忆：" in output
     assert "当前召回数量：0" in output
+    assert "Skills：" in output
+    assert "选中数量：0" in output
     assert "长期记忆库：未启用" in output
 
 
@@ -179,3 +183,60 @@ def test_inspect_reports_missing_thread(monkeypatch, capsys, tmp_path) -> None: 
 
     assert exit_code == 1
     assert "错误：找不到任务：missing-thread" in output
+
+
+def test_run_passes_explicit_skill_overrides(monkeypatch, capsys) -> None:  # noqa: ANN001
+    result = ResearchResult(
+        question="测试问题",
+        answer="答案",
+        state=create_initial_state("测试问题"),
+    )
+    received = {}
+
+    def fake_run(question, **kwargs):  # noqa: ANN001, ANN003, ANN202
+        received.update(kwargs)
+        return result
+
+    monkeypatch.setattr("deepresearch.cli.run_question", fake_run)
+
+    assert main(["run", "测试问题", "--skill", "verify", "--skill", "report"]) == 0
+    assert received["skill_overrides"] == ("verify", "report")
+    assert "答案" in capsys.readouterr().out
+
+
+def test_skills_cli_validates_lists_shows_and_disables(
+    monkeypatch, capsys, tmp_path
+) -> None:  # noqa: ANN001
+    monkeypatch.chdir(tmp_path)
+    skill_dir = tmp_path / "skills" / "verify"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        """---
+name: verify
+description: 核验来源
+tags: [verification]
+tools: [read_page]
+---
+优先查看一手来源。
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DEEPRESEARCH_SKILL_INCLUDE_BUILTIN", "false")
+    monkeypatch.setenv("DEEPRESEARCH_SKILL_DIRS", str(tmp_path / "skills"))
+    monkeypatch.setenv("DEEPRESEARCH_SKILL_DB_PATH", str(tmp_path / "skills.db"))
+    monkeypatch.setenv(
+        "DEEPRESEARCH_SKILL_STORAGE_PATH", str(tmp_path / "objects")
+    )
+
+    assert main(["skills", "validate"]) == 0
+    assert "校验完成：1 个有效，0 个无效" in capsys.readouterr().out
+    assert main(["skills", "list"]) == 0
+    assert "verify [verify__" in capsys.readouterr().out
+    assert main(["skills", "show", "verify"]) == 0
+    assert "优先查看一手来源" in capsys.readouterr().out
+    assert main(["skills", "disable", "verify"]) == 0
+    assert "已停用：verify" in capsys.readouterr().out
+    assert main(["skills", "list"]) == 0
+    assert "disabled" in capsys.readouterr().out
+    assert main(["skills", "history", "verify"]) == 0
+    assert "active" in capsys.readouterr().out

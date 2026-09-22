@@ -5,6 +5,7 @@ from deepresearch.reporting import (
     calculate_stats,
     format_governance_summary,
     format_memory_summary,
+    format_skill_summary,
     format_trace,
     save_markdown_report,
 )
@@ -225,6 +226,38 @@ def test_format_memory_summary_displays_runtime_metrics_and_accepts_old_state() 
     assert "当前召回数量：1" in summary
     assert "记忆注入 Token：88" in summary
     assert "当前召回 ID：trace-1" in summary
+
+
+def test_format_skill_summary_displays_versioned_runtime_metrics() -> None:
+    state = make_state()
+    assert format_skill_summary(state) == "Skills：暂无运行记录"
+    state["skills"] = {
+        "selection_count": 1,
+        "selected": [
+            {
+                "skill_id": "verify__abc",
+                "name": "verify",
+                "content_hash": "abc",
+                "score": 0.75,
+                "reason": "bm25",
+                "forced": False,
+                "allowed_tools": ["read_page"],
+            }
+        ],
+        "dropped": [],
+        "injection_count": 1,
+        "injected_tokens": 80,
+        "aligned_tool_calls": 2,
+        "completed_recorded": True,
+        "last_error": None,
+    }
+
+    summary = format_skill_summary(state)
+
+    assert "选中数量：1" in summary
+    assert "verify [verify__abc]：0.7500" in summary
+    assert "注入 Token：80" in summary
+    assert "匹配 Tool Call：2" in summary
 
 
 def test_save_markdown_report_writes_final_report(tmp_path) -> None:  # noqa: ANN001
