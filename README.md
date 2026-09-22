@@ -14,7 +14,7 @@
 ![Tests](https://img.shields.io/badge/tests-184_passed-2EA44F)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[快速开始](#快速开始) · [工作流程](#工作流程) · [核心设计](#核心设计) · [学习路线](#分阶段复现路线) · [示例报告](examples/sample-report.md)
+[快速开始](#快速开始) · [工作流程](#工作流程) · [核心设计](#核心设计) · [学习路线](#分阶段实现路线) · [示例报告](examples/sample-report.md)
 
 </div>
 
@@ -34,9 +34,9 @@ DeepResearch Agent 是一个面向学习与工程实践的 LangGraph 研究 Agen
 - 在不同任务之间按需召回长期记忆。
 
 > [!NOTE]
-> 本项目是受 [Poirot](https://github.com/HezaoHezao/poirot) 启发的独立学习型实现，
-> 不是 Poirot 官方项目，也不是对其源码的逐文件复制。项目按照可运行、可测试的 Git 阶段，
-> 从最小 Agent 逐步重建 Tool、Middleware、State、Checkpoint、Context Governance 和 Memory。
+> 这是一个围绕 LangGraph 自主搭建的学习型工程项目。设计过程中对照过多个开源 Agent 的
+> 公开架构，但 README 中描述的能力都对应本仓库内的代码和测试；项目不隶属于任何参考项目。
+> 参考资料与具体取舍集中放在[致谢与架构参考](#致谢与架构参考)，不作为项目功能背书。
 
 ### 输入与输出
 
@@ -202,6 +202,51 @@ LangGraph 在每个执行步骤后自动把 State 保存到 SQLite
 这个项目把模型能力和确定性程序逻辑分开：模型负责规划、选择工具和撰写报告；程序负责
 记录真实执行结果、约束工具顺序、校验引用、保存 Checkpoint 和控制上下文预算。这样既保留
 Agent 的灵活性，也让关键状态可以测试、恢复和审计。
+
+### 分层架构
+
+```mermaid
+flowchart TB
+    CLI[CLI / Python API] --> RUNNER[运行与流式事件层]
+    RUNNER --> GRAPH[LangGraph Agent Graph]
+
+    subgraph Runtime[Agent Runtime]
+        GRAPH <--> MODEL[Chat Model]
+        GRAPH <--> TOOLS[Plan / Search / Read / Report Tools]
+        GRAPH <--> MIDDLEWARE[Middleware Chain]
+    end
+
+    subgraph StateLayer[State & Durability]
+        STATE[ResearchState]
+        CHECKPOINT[(SQLite Checkpoint)]
+        EVIDENCE[Sources & Observations]
+    end
+
+    subgraph ContextLayer[Context Engineering]
+        TAGGED[Request-scoped Tagged Context]
+        EXTERNAL[P1 Tool Result Externalization]
+        COMPACT[P4 Snapshot & Summarization]
+        FINALIZE[P5 Bounded Finalization]
+    end
+
+    subgraph MemoryLayer[Cross-task Memory]
+        RETRIEVER[BM25 + Strength Retrieval]
+        STORE[(Markdown Truth Store)]
+        WORKER[Bounded Extraction Worker]
+    end
+
+    GRAPH <--> STATE
+    STATE <--> CHECKPOINT
+    MIDDLEWARE --> EVIDENCE
+    MIDDLEWARE --> TAGGED
+    TAGGED --> EXTERNAL --> COMPACT --> FINALIZE
+    MIDDLEWARE <--> RETRIEVER
+    RETRIEVER <--> STORE
+    WORKER --> STORE
+```
+
+这里有两条刻意分开的持久化路径：Checkpoint 保存“同一个任务如何继续运行”，长期记忆保存
+“后续任务可能再次用到什么”。把二者分开，可以避免恢复执行和跨任务知识混成一个不可控的数据层。
 
 ## 快速开始
 
@@ -393,7 +438,7 @@ deepresearch-agent/
 - **摘要压缩**：让内部模型把较旧消息转换成结构化摘要，再用 LangGraph 消息 reducer 清理旧前缀并保留最近对话。
 - **强制收尾**：上下文进入 P5 后停止产生新研究材料，只允许整理计划、保存报告或直接基于已有证据作答。
 
-## 分阶段复现路线
+## 分阶段实现路线
 
 每个阶段都应该满足“代码可运行、测试通过、单独 Git 提交”后，再进入下一阶段。
 
@@ -436,42 +481,23 @@ git commit -m "feat: add web search tool"
 
 一次提交只完成一个可解释的变化。不要提交 `.env`、`.venv`、缓存、运行日志和本地数据库。
 
-## 与 Poirot 的对应关系
+## 架构取舍与开源参考
 
-| 本项目当前文件 | Poirot 中对应职责 | 作用 |
+本项目不是对某一个仓库的逐模块移植。下面列出的是公开架构带来的设计问题，以及本项目给出的
+具体答案，方便区分“参考了什么思想”和“代码实际实现了什么”。
+
+| 设计问题 | 本项目的实现 | 与公开项目的关系 |
 |---|---|---|
-| `src/deepresearch/cli.py` | `backend/app/cli/main.py` | 接收用户输入 |
-| `src/deepresearch/config.py` | `backend/agents/config/` | 读取模型配置 |
-| `src/deepresearch/checkpointing.py` | Checkpoint 配置层 | 创建 Saver、生成 `thread_id` 和运行 config |
-| `src/deepresearch/events.py` | Agent 事件协议 | 把 LangGraph 原始更新转换成稳定的 `ResearchEvent` |
-| `src/deepresearch/state.py` | `agents/state/types.py` + `reducers.py` | 定义共享研究状态和合并规则 |
-| `src/deepresearch/context/` | 上下文治理策略层 | 定义治理类型、Token 统计、窗口识别和 P1～P5 阈值判断 |
-| `src/deepresearch/context/tagged.py` | Tagged Context 组装层 | 把选定 State 和消息转换成 request-scoped 标签化视图 |
-| `src/deepresearch/context/externalizer.py` | P1 外化执行器 | 保存完整 Tool 结果，并生成保持相同 ID 的紧凑替代消息 |
-| `src/deepresearch/context/snapshot.py` | P4 Snapshot 执行器 | 压缩前保存带 SHA-256 校验的消息和 State，并支持验证加载 |
-| `src/deepresearch/context/summarizer.py` | P4 摘要执行器 | 安全划分新旧历史、调用内部摘要模型并生成消息替换 patch |
-| `src/deepresearch/memory/` | `agents/memory/` | 定义长期记忆 Schema、Store、Retriever、Manager、Provider、衰减策略和后台 Worker |
-| `src/deepresearch/tools/web_search.py` | `agents/agent_tools/builtin/ddg_search.py` | 执行网页搜索 |
-| `src/deepresearch/tools/read_page.py` | 网页读取类 Tool | 安全下载并提取网页正文 |
-| `src/deepresearch/tools/research_plan.py` | Todo/计划类状态 Tool | 创建计划并推进步骤状态 |
-| `src/deepresearch/tools/final_report.py` | 最终产物 Tool | 校验报告与来源，并把 Markdown 保存到 State |
-| `src/deepresearch/middlewares/evidence.py` | `agents/middlewares/evidence_middleware.py` | 把搜索和正文结果沉淀为结构化证据 |
-| `src/deepresearch/middlewares/plan_context.py` | 计划上下文兼容层 | 提供计划投影格式，实际 Agent 由 Tagged Context 统一组装 |
-| `src/deepresearch/middlewares/sequential_tools.py` | Tool 调度 Middleware | 禁止并行 Tool Call，避免 State 并发写冲突 |
-| `src/deepresearch/middlewares/reflection.py` | 反思/质量控制 Middleware | 在结束前检查缺口，并有限次回到模型 |
-| `src/deepresearch/middlewares/context_governance.py` | 上下文治理 Middleware | 每次模型调用后把测量和阈值判断结果写入 State |
-| `src/deepresearch/middlewares/context_externalization.py` | P1 外化 Middleware | 调用模型前消费 P1，并累计外化数量和预计节省 Token |
-| `src/deepresearch/middlewares/context_compaction.py` | P4 压缩 Middleware | 串联 Snapshot、摘要、Token 缩减校验和治理指标更新 |
-| `src/deepresearch/middlewares/context_finalization.py` | P5 收尾 Middleware | 拦截扩张型 Tool Call、允许报告类 Tool，并执行有界收尾 |
-| `src/deepresearch/middlewares/tagged_context.py` | Tagged Context Middleware | 请求前保存审计快照，并只对本次模型请求应用标签化投影 |
-| `src/deepresearch/middlewares/memory_recall.py` | Memory Middleware | 按 namespace 召回相关记忆，只把索引写入 State，并通过 Tagged Context 临时注入正文 |
-| `src/deepresearch/middlewares/memory_consolidation.py` | Memory Consolidation Middleware | Agent 完整结束后提交一次有界后台提取任务 |
-| `src/deepresearch/reporting.py` | 输出层 | 显示 Trace，并把 `final_report` 写成 `.md` 文件 |
-| `build_agent()` | `agents/leader/factory.py` | 编译 Agent Graph |
-| `run_with_model()` | `agents/leader/agent.py` | 执行 Graph 并整理输出 |
-| `ResearchResult` | `AgentRunResult` | 稳定的输出边界 |
+| Agent 如何持续执行 | 使用 LangChain `create_agent` 构建 LangGraph 循环，以 Middleware 组合证据、反思、上下文和记忆能力 | 直接建立在 [LangChain Agents](https://docs.langchain.com/oss/python/langchain/agents) 与 [LangGraph](https://docs.langchain.com/oss/python/langgraph/overview) 的公开接口上 |
+| 研究任务如何闭环 | 显式计划 → 搜索 → 正文读取 → 证据聚合 → 缺口检查 → 引用报告 | 与 [Open Deep Research](https://github.com/langchain-ai/open_deep_research) 等研究 Agent 共享 Plan-and-Research 思路；状态字段和校验规则由本项目实现 |
+| 长上下文如何治理 | P1 把大型 Tool 结果外化到文件；P4 先保存可校验 Snapshot 再摘要；P5 禁止扩张型 Tool 并有界收尾 | [DeerFlow Context Engineering](https://github.com/bytedance/deer-flow/blob/main/frontend/src/content/en/introduction/core-concepts.mdx) 同样强调摘要和文件系统外部工作记忆；本项目没有照搬其实现，也尚未采用子 Agent 上下文隔离 |
+| 上下文如何保持可审计 | 原始 State 保留，模型每轮只接收 request-scoped Tagged Context；压缩失败或未节省 Token 时不替换历史 | 与 DeerFlow 的“只给模型当前工作集”原则方向一致，但标签协议、治理阶段和失败回退是本项目自己的实现 |
+| 任务恢复与长期记忆如何区分 | SQLite Checkpoint 恢复同一 Graph；Markdown truth store 保存跨任务记忆，两条数据链互不替代 | Checkpoint 使用 LangGraph 能力；“运行状态与跨会话记忆分层”也是 DeerFlow 等 long-horizon harness 的通用设计 |
+| 记忆如何存取 | `episodic / semantic / procedural` 三类 Trace，Markdown 持久化，BM25 + strength 召回，惰性衰减、软遗忘和后台巩固 | DeerFlow 2.0 当前强调可插拔 Memory backend；本项目选择更小、更透明的本地实现，不依赖向量数据库，也不声称兼容 DeerMem |
 
-先掌握这 5 个位置，再扩展功能，会比一开始搬运 Poirot 的全部模块更容易定位问题。
+> [!IMPORTANT]
+> DeerFlow 是包含 Harness、App、Sub-agent、Sandbox、Skills、MCP 和多种 Memory backend 的完整系统。
+> 本项目目前是单 Agent、CLI 优先的研究内核，尚未实现这些生产级能力；README 不把路线图当成已完成功能。
 
 ## 长期记忆
 
@@ -510,12 +536,14 @@ uv run pytest -q
 3. 新行为包含对应测试，且现有测试保持通过；
 4. README、类型注解和错误信息与代码行为一致。
 
-## 致谢与许可
+## 致谢与架构参考
 
-项目的架构学习自 [Poirot](https://github.com/HezaoHezao/poirot)，并建立在
-[LangChain](https://github.com/langchain-ai/langchain) 与
-[LangGraph](https://github.com/langchain-ai/langgraph) 等开源项目之上。完整说明见
-[ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md)。
+项目建立在 [LangChain](https://github.com/langchain-ai/langchain) 与
+[LangGraph](https://github.com/langchain-ai/langgraph) 的公开能力之上；设计过程中也对照了
+[DeerFlow](https://github.com/bytedance/deer-flow)、
+[Open Deep Research](https://github.com/langchain-ai/open_deep_research) 和其他研究 Agent 的
+公开实现。它们用于理解不同架构选择，不代表本项目与其存在官方关系或一一对应的源码关系。
+完整说明见 [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md)。
 
 本项目采用 [MIT License](LICENSE)。你可以学习、使用和修改代码；分发副本或重要代码片段时，
 请保留许可证和版权声明。

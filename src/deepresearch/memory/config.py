@@ -1,4 +1,4 @@
-"""Configuration values for the Poirot-inspired memory subsystem."""
+"""Configuration values for the long-term memory subsystem."""
 
 from __future__ import annotations
 

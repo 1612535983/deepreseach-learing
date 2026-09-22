@@ -1,4 +1,4 @@
-"""Poirot-style memory operations with no model dependency."""
+"""Deterministic memory operations with no model dependency."""
 
 from __future__ import annotations
 

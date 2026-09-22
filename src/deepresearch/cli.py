@@ -106,7 +106,7 @@ def _memory_store_summary() -> str:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="deepresearch",
-        description="从 Poirot 核心执行链开始复现 Deep Research",
+        description="可恢复、可审计的 Deep Research Agent",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
