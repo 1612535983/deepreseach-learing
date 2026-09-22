@@ -3,6 +3,7 @@ import pytest
 from deepresearch import config as config_module
 from deepresearch.config import Settings
 from deepresearch.memory.config import MemoryConfig
+from deepresearch.skill.config import SkillConfig
 
 
 def test_settings_require_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -57,3 +58,15 @@ def test_memory_config_rejects_invalid_environment(monkeypatch: pytest.MonkeyPat
 
     with pytest.raises(ValueError, match="MEMORY_ENABLE_RECALL"):
         MemoryConfig.from_env()
+
+
+def test_settings_read_skill_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEEPRESEARCH_API_KEY", "test-key")
+    monkeypatch.setenv("DEEPRESEARCH_SKILL_USE", "default")
+    monkeypatch.setenv("DEEPRESEARCH_SKILL_MAX_SKILLS", "2")
+
+    settings = Settings.from_env()
+
+    assert isinstance(settings.skill, SkillConfig)
+    assert settings.skill.enabled is True
+    assert settings.skill.max_skills == 2

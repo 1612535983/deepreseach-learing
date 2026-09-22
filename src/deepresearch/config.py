@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from dotenv import load_dotenv
 
 from deepresearch.memory.config import MemoryConfig
+from deepresearch.skill.config import SkillConfig
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,7 @@ class Settings:
     model: str = "deepseek-chat"
     base_url: str | None = "https://api.deepseek.com"
     memory: MemoryConfig = field(default_factory=MemoryConfig)
+    skill: SkillConfig = field(default_factory=SkillConfig)
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -36,4 +38,5 @@ class Settings:
             model=model,
             base_url=base_url,
             memory=MemoryConfig.from_env(),
+            skill=SkillConfig.from_env(),
         )
