@@ -28,6 +28,10 @@ from deepresearch.checkpointing import (
 from deepresearch.context.tagged import ContextAssembler
 from deepresearch.config import Settings
 from deepresearch.events import ResearchEvent, events_from_update
+from deepresearch.evaluation.bootstrap import get_evaluation_provider
+from deepresearch.evaluation.config import EvaluationConfig
+from deepresearch.evaluation.provider import DecisionProvider
+from deepresearch.evaluation.report import ReportEvaluator
 from deepresearch.memory.config import MemoryConfig
 from deepresearch.memory.context import MemoryContextRenderer
 from deepresearch.memory.provider import MemoryProvider
@@ -50,6 +54,7 @@ from deepresearch.middlewares import (
     MemoryRecallMiddleware,
     MemoryConsolidationMiddleware,
     ReflectionMiddleware,
+    ReportEvaluationMiddleware,
     SequentialToolCallMiddleware,
     SkillInjectionMiddleware,
     SkillMetricsMiddleware,
@@ -139,6 +144,8 @@ def build_agent(
     skill_manager: SkillManager | None = None,
     skill_config: SkillConfig | None = None,
     skill_overrides: tuple[str, ...] = (),
+    evaluation_provider: DecisionProvider | None = None,
+    evaluation_config: EvaluationConfig | None = None,
 ) -> Any:
     """Compile the model and prompt into LangChain's ReAct agent graph."""
 
@@ -191,6 +198,14 @@ def build_agent(
         # after_model hooks run in reverse registration order. Keeping Reflection
         # here makes Governance update the latest budget first, then lets P5
         # suppress reflection loops before final Tool routing is decided.
+        if evaluation_provider is not None:
+            resolved_evaluation_config = evaluation_config or EvaluationConfig()
+            middlewares.append(
+                ReportEvaluationMiddleware(
+                    ReportEvaluator(evaluation_provider, resolved_evaluation_config),
+                    resolved_evaluation_config,
+                )
+            )
         middlewares.append(ReflectionMiddleware())
     if memory_provider is not None:
         middlewares.append(
@@ -305,6 +320,8 @@ def run_with_model(
     skill_manager: SkillManager | None = None,
     skill_config: SkillConfig | None = None,
     skill_overrides: tuple[str, ...] = (),
+    evaluation_provider: DecisionProvider | None = None,
+    evaluation_config: EvaluationConfig | None = None,
 ) -> ResearchResult:
     """Run one question through a supplied model and return the final answer."""
 
@@ -325,6 +342,8 @@ def run_with_model(
         skill_manager=skill_manager,
         skill_config=skill_config,
         skill_overrides=skill_overrides,
+        evaluation_provider=evaluation_provider,
+        evaluation_config=evaluation_config,
     )
     state = graph.invoke(
         create_initial_state(
@@ -350,6 +369,8 @@ def stream_with_model(
     skill_manager: SkillManager | None = None,
     skill_config: SkillConfig | None = None,
     skill_overrides: tuple[str, ...] = (),
+    evaluation_provider: DecisionProvider | None = None,
+    evaluation_config: EvaluationConfig | None = None,
 ) -> ResearchResult:
     """Run the graph once while synchronously delivering progress events."""
 
@@ -370,6 +391,8 @@ def stream_with_model(
         skill_manager=skill_manager,
         skill_config=skill_config,
         skill_overrides=skill_overrides,
+        evaluation_provider=evaluation_provider,
+        evaluation_config=evaluation_config,
     )
     final_state: ResearchState | None = None
     on_event(
@@ -449,6 +472,8 @@ async def astream_with_model(
     skill_manager: SkillManager | None = None,
     skill_config: SkillConfig | None = None,
     skill_overrides: tuple[str, ...] = (),
+    evaluation_provider: DecisionProvider | None = None,
+    evaluation_config: EvaluationConfig | None = None,
 ) -> ResearchResult:
     """Run the graph once while asynchronously delivering progress events."""
 
@@ -469,6 +494,8 @@ async def astream_with_model(
         skill_manager=skill_manager,
         skill_config=skill_config,
         skill_overrides=skill_overrides,
+        evaluation_provider=evaluation_provider,
+        evaluation_config=evaluation_config,
     )
     final_state: ResearchState | None = None
     await on_event(
@@ -545,6 +572,8 @@ def resume_with_model(
     memory_worker: MemoryWorker | None = None,
     skill_manager: SkillManager | None = None,
     skill_config: SkillConfig | None = None,
+    evaluation_provider: DecisionProvider | None = None,
+    evaluation_config: EvaluationConfig | None = None,
 ) -> ResearchResult:
     """Continue an existing graph thread from its latest saved checkpoint."""
 
@@ -560,6 +589,8 @@ def resume_with_model(
         memory_worker=memory_worker,
         skill_manager=skill_manager,
         skill_config=skill_config,
+        evaluation_provider=evaluation_provider,
+        evaluation_config=evaluation_config,
     )
     state = cast(ResearchState, graph.invoke(None, config=config))
     return _result_from_state(question, state, normalized_thread_id)
@@ -577,6 +608,8 @@ def stream_resume_with_model(
     memory_worker: MemoryWorker | None = None,
     skill_manager: SkillManager | None = None,
     skill_config: SkillConfig | None = None,
+    evaluation_provider: DecisionProvider | None = None,
+    evaluation_config: EvaluationConfig | None = None,
 ) -> ResearchResult:
     """Continue a saved graph thread while publishing synchronous events."""
 
@@ -592,6 +625,8 @@ def stream_resume_with_model(
         memory_worker=memory_worker,
         skill_manager=skill_manager,
         skill_config=skill_config,
+        evaluation_provider=evaluation_provider,
+        evaluation_config=evaluation_config,
     )
     final_state: ResearchState | None = None
     on_event(
@@ -670,6 +705,7 @@ def run_question(
     model = build_model(resolved_settings)
     memory_provider, memory_worker = _resolve_memory_runtime(resolved_settings, model)
     skill_manager = get_skill_manager(resolved_settings.skill)
+    evaluation_provider = get_evaluation_provider(resolved_settings.evaluation)
     if checkpointer is not None:
         result = run_with_model(
             question,
@@ -683,6 +719,8 @@ def run_question(
             skill_manager=skill_manager,
             skill_config=resolved_settings.skill,
             skill_overrides=skill_overrides,
+            evaluation_provider=evaluation_provider,
+            evaluation_config=resolved_settings.evaluation,
         )
     else:
         with open_sqlite_checkpointer() as sqlite_checkpointer:
@@ -698,6 +736,8 @@ def run_question(
                 skill_manager=skill_manager,
                 skill_config=resolved_settings.skill,
                 skill_overrides=skill_overrides,
+                evaluation_provider=evaluation_provider,
+                evaluation_config=resolved_settings.evaluation,
             )
     _flush_memory_worker(memory_worker)
     return result
@@ -718,6 +758,7 @@ def stream_question(
     model = build_model(resolved_settings)
     memory_provider, memory_worker = _resolve_memory_runtime(resolved_settings, model)
     skill_manager = get_skill_manager(resolved_settings.skill)
+    evaluation_provider = get_evaluation_provider(resolved_settings.evaluation)
     if checkpointer is not None:
         result = stream_with_model(
             question,
@@ -732,6 +773,8 @@ def stream_question(
             skill_manager=skill_manager,
             skill_config=resolved_settings.skill,
             skill_overrides=skill_overrides,
+            evaluation_provider=evaluation_provider,
+            evaluation_config=resolved_settings.evaluation,
         )
     else:
         with open_sqlite_checkpointer() as sqlite_checkpointer:
@@ -748,6 +791,8 @@ def stream_question(
                 skill_manager=skill_manager,
                 skill_config=resolved_settings.skill,
                 skill_overrides=skill_overrides,
+                evaluation_provider=evaluation_provider,
+                evaluation_config=resolved_settings.evaluation,
             )
     _flush_memory_worker(memory_worker)
     return result
@@ -768,6 +813,7 @@ async def astream_question(
     model = build_model(resolved_settings)
     memory_provider, memory_worker = _resolve_memory_runtime(resolved_settings, model)
     skill_manager = get_skill_manager(resolved_settings.skill)
+    evaluation_provider = get_evaluation_provider(resolved_settings.evaluation)
     if checkpointer is not None:
         result = await astream_with_model(
             question,
@@ -782,6 +828,8 @@ async def astream_question(
             skill_manager=skill_manager,
             skill_config=resolved_settings.skill,
             skill_overrides=skill_overrides,
+            evaluation_provider=evaluation_provider,
+            evaluation_config=resolved_settings.evaluation,
         )
     else:
         async with open_async_sqlite_checkpointer() as sqlite_checkpointer:
@@ -798,6 +846,8 @@ async def astream_question(
                 skill_manager=skill_manager,
                 skill_config=resolved_settings.skill,
                 skill_overrides=skill_overrides,
+                evaluation_provider=evaluation_provider,
+                evaluation_config=resolved_settings.evaluation,
             )
     if memory_worker is not None:
         flushed = await asyncio.to_thread(memory_worker.flush, 10.0)
@@ -818,6 +868,7 @@ def resume_question(
     model = build_model(resolved_settings)
     memory_provider, memory_worker = _resolve_memory_runtime(resolved_settings, model)
     skill_manager = get_skill_manager(resolved_settings.skill)
+    evaluation_provider = get_evaluation_provider(resolved_settings.evaluation)
     if checkpointer is not None:
         result = resume_with_model(
             thread_id,
@@ -829,6 +880,8 @@ def resume_question(
             memory_worker=memory_worker,
             skill_manager=skill_manager,
             skill_config=resolved_settings.skill,
+            evaluation_provider=evaluation_provider,
+            evaluation_config=resolved_settings.evaluation,
         )
     else:
         with open_sqlite_checkpointer() as sqlite_checkpointer:
@@ -842,6 +895,8 @@ def resume_question(
                 memory_worker=memory_worker,
                 skill_manager=skill_manager,
                 skill_config=resolved_settings.skill,
+                evaluation_provider=evaluation_provider,
+                evaluation_config=resolved_settings.evaluation,
             )
     _flush_memory_worker(memory_worker)
     return result
@@ -860,6 +915,7 @@ def stream_resume_question(
     model = build_model(resolved_settings)
     memory_provider, memory_worker = _resolve_memory_runtime(resolved_settings, model)
     skill_manager = get_skill_manager(resolved_settings.skill)
+    evaluation_provider = get_evaluation_provider(resolved_settings.evaluation)
     if checkpointer is not None:
         result = stream_resume_with_model(
             thread_id,
@@ -872,6 +928,8 @@ def stream_resume_question(
             memory_worker=memory_worker,
             skill_manager=skill_manager,
             skill_config=resolved_settings.skill,
+            evaluation_provider=evaluation_provider,
+            evaluation_config=resolved_settings.evaluation,
         )
     else:
         with open_sqlite_checkpointer() as sqlite_checkpointer:
@@ -886,6 +944,8 @@ def stream_resume_question(
                 memory_worker=memory_worker,
                 skill_manager=skill_manager,
                 skill_config=resolved_settings.skill,
+                evaluation_provider=evaluation_provider,
+                evaluation_config=resolved_settings.evaluation,
             )
     _flush_memory_worker(memory_worker)
     return result

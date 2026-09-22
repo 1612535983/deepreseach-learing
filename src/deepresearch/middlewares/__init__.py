@@ -11,6 +11,7 @@ from deepresearch.middlewares.memory_recall import MemoryRecallMiddleware
 from deepresearch.middlewares.memory_consolidation import MemoryConsolidationMiddleware
 from deepresearch.middlewares.plan_context import PlanContextMiddleware
 from deepresearch.middlewares.reflection import ReflectionMiddleware
+from deepresearch.middlewares.report_evaluation import ReportEvaluationMiddleware
 from deepresearch.middlewares.sequential_tools import SequentialToolCallMiddleware
 from deepresearch.middlewares.skill_selection import SkillSelectionMiddleware
 from deepresearch.middlewares.skill_injection import SkillInjectionMiddleware
@@ -27,6 +28,7 @@ __all__ = [
     "MemoryConsolidationMiddleware",
     "PlanContextMiddleware",
     "ReflectionMiddleware",
+    "ReportEvaluationMiddleware",
     "SequentialToolCallMiddleware",
     "SkillSelectionMiddleware",
     "SkillInjectionMiddleware",

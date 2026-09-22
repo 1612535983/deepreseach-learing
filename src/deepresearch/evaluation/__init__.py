@@ -1,6 +1,7 @@
 """Provider-neutral probabilistic evaluation for research outputs."""
 
 from deepresearch.evaluation.config import EvaluationConfig, EvaluationMode
+from deepresearch.evaluation.bootstrap import get_evaluation_provider
 from deepresearch.evaluation.exceptions import (
     EvaluationProviderError,
     EvaluationResponseError,
@@ -30,6 +31,7 @@ __all__ = [
     "DecisionUsage",
     "EvaluationConfig",
     "EvaluationMode",
+    "get_evaluation_provider",
     "EvaluationProviderError",
     "EvaluationResponseError",
     "EvaluationState",
