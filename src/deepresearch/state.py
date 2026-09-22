@@ -7,10 +7,13 @@ tool results.
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, NotRequired, TypedDict
+from copy import deepcopy
+from typing import Annotated, Any, Literal, NotRequired, TypedDict, cast
 
 from langchain.agents import AgentState
 from langchain_core.messages import HumanMessage
+
+from deepresearch.context.types import GovernanceState
 
 
 class SearchRecord(TypedDict):
@@ -140,6 +143,54 @@ def merge_plan(
     return incoming if incoming is not None else current
 
 
+def merge_governance(
+    current: GovernanceState | None,
+    incoming: GovernanceState | None,
+) -> GovernanceState:
+    """Deep-merge partial governance patches without mutating either input."""
+
+    def merge_dict(
+        target: dict[str, Any],
+        patch: dict[str, Any],
+    ) -> dict[str, Any]:
+        for key, incoming_value in patch.items():
+            current_value = target.get(key)
+            if isinstance(current_value, dict) and isinstance(incoming_value, dict):
+                target[key] = merge_dict(current_value, incoming_value)
+            else:
+                target[key] = deepcopy(incoming_value)
+        return target
+
+    merged = merge_dict(deepcopy(dict(current or {})), dict(incoming or {}))
+    return cast(GovernanceState, merged)
+
+
+def create_initial_governance_state() -> GovernanceState:
+    """Create the complete, serializable governance namespace for a new run."""
+
+    return {
+        "context": {
+            "model_name": None,
+            "budget": {
+                "current_tokens": 0,
+                "window_tokens": 0,
+                "utilization_ratio": 0.0,
+                "token_count_method": "unknown",
+                "window_source": "unknown",
+            },
+            "cumulative_usage": {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0,
+            },
+            "model_call_count": 0,
+            "pending_stages": [],
+            "hard_limit_reached": False,
+            "seen_message_usage": {},
+        }
+    }
+
+
 class ResearchState(AgentState):
     """The shared blackboard for one research graph execution."""
 
@@ -153,6 +204,7 @@ class ResearchState(AgentState):
     reflection_attempts: NotRequired[int]
     research_gaps: NotRequired[list[str]]
     final_report: Annotated[str | None, merge_final_report]
+    governance: Annotated[GovernanceState, merge_governance]
 
 
 def create_initial_state(question: str) -> ResearchState:
@@ -170,4 +222,5 @@ def create_initial_state(question: str) -> ResearchState:
         "reflection_attempts": 0,
         "research_gaps": [],
         "final_report": None,
+        "governance": create_initial_governance_state(),
     }
