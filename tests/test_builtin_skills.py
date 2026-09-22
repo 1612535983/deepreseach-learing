@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from importlib.resources import files
 
 from deepresearch.skill.config import SkillConfig
 from deepresearch.skill.manager import BUILTIN_SKILLS_DIR, SkillManager
@@ -17,6 +18,15 @@ def test_builtin_skill_bundles_are_valid_and_complete() -> None:
         "evidence-report-writing",
     }
     assert all(item.record.lineage.origin == "BUILTIN" for item in discovered.skills)
+
+
+def test_builtin_skills_are_available_as_package_resources() -> None:
+    resource = files("deepresearch.skill").joinpath(
+        "builtin_skills/web-research/SKILL.md"
+    )
+
+    assert resource.is_file()
+    assert "name: web-research" in resource.read_text(encoding="utf-8")
 
 
 def test_manager_loads_builtins_and_user_bundle_can_override_name(

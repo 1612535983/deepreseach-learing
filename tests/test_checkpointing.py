@@ -18,6 +18,8 @@ from deepresearch.checkpointing import (
     resolve_checkpoint_run,
 )
 from deepresearch.events import ResearchEvent
+from deepresearch.skill.config import SkillConfig
+from deepresearch.skill.manager import SkillManager
 
 
 def checkpoint_values(checkpointer, thread_id: str) -> dict:  # noqa: ANN001
@@ -184,6 +186,79 @@ def test_resume_continues_interrupted_thread_after_saver_reopen(tmp_path) -> Non
 
     assert result.question == "中断问题"
     assert result.answer == "恢复成功"
+
+
+def test_resume_keeps_checkpointed_skill_version_after_source_update(
+    tmp_path,
+) -> None:  # noqa: ANN001
+    class FailingFakeModel(FakeMessagesListChatModel):
+        def _generate(self, *args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            raise RuntimeError("模拟模型服务中断")
+
+    skill_file = tmp_path / "skills" / "verify" / "SKILL.md"
+    skill_file.parent.mkdir(parents=True)
+    skill_file.write_text(
+        """---
+name: verify
+description: 核验来源
+version: 1
+---
+只使用版本一流程。
+""",
+        encoding="utf-8",
+    )
+    skill_config = SkillConfig(
+        use="default",
+        db_path=tmp_path / "skills.db",
+        storage_path=tmp_path / "objects",
+        skill_dirs=(tmp_path / "skills",),
+        include_builtin=False,
+        min_relevance=0.0,
+    )
+    manager = SkillManager(skill_config)
+    first_version = manager.load_startup()[0]
+    checkpoint_path = tmp_path / "skill-resume.sqlite"
+
+    with pytest.raises(RuntimeError, match="模拟模型服务中断"):
+        with open_sqlite_checkpointer(checkpoint_path) as checkpointer:
+            run_with_model(
+                "请核验来源",
+                FailingFakeModel(responses=[AIMessage(content="不会返回")]),
+                checkpointer=checkpointer,
+                thread_id="skill-resume",
+                skill_manager=manager,
+                skill_config=skill_config,
+                skill_overrides=("verify",),
+            )
+
+    skill_file.write_text(
+        """---
+name: verify
+description: 核验来源
+version: 2
+---
+只使用版本二流程。
+""",
+        encoding="utf-8",
+    )
+    second_version = manager.load_startup()[-1]
+    assert first_version.skill_id != second_version.skill_id
+
+    with open_sqlite_checkpointer(checkpoint_path) as checkpointer:
+        result = resume_with_model(
+            "skill-resume",
+            FakeMessagesListChatModel(responses=[AIMessage(content="恢复成功")]),
+            checkpointer=checkpointer,
+            skill_manager=manager,
+            skill_config=skill_config,
+        )
+
+    assert result.state["skills"]["selection_count"] == 1
+    assert result.state["skills"]["selected"][0]["skill_id"] == first_version.skill_id
+    rendered = result.state["tagged_context"]["rendered"]
+    assert "只使用版本一流程" in rendered
+    assert "只使用版本二流程" not in rendered
+    manager.close()
 
 
 def test_new_run_rejects_existing_thread() -> None:

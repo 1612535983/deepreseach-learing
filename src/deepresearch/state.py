@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from typing import Annotated, Any, Literal, NotRequired, TypedDict, cast
+from uuid import uuid4
 
 from langchain.agents import AgentState
 from langchain_core.messages import HumanMessage
@@ -223,6 +224,7 @@ def create_initial_skill_state() -> SkillRuntimeState:
     """Create the complete checkpoint-safe skill namespace for a new run."""
 
     return {
+        "run_id": uuid4().hex,
         "query_hash": None,
         "catalog_hash": None,
         "selected": [],
@@ -230,6 +232,7 @@ def create_initial_skill_state() -> SkillRuntimeState:
         "selection_count": 0,
         "injection_count": 0,
         "injected_tokens": 0,
+        "render_signature": None,
         "aligned_tool_calls": 0,
         "completed_recorded": False,
         "last_error": None,

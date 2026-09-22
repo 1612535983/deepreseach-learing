@@ -107,3 +107,20 @@ def test_metrics_skip_dropped_skills_and_support_async(tmp_path: Path) -> None:
     assert metrics.aligned_tool_calls == 0
     assert metrics.completed_runs == 0
     manager.close()
+
+
+def test_uncheckpointed_runs_with_same_question_have_distinct_metrics_ids(
+    tmp_path: Path,
+) -> None:
+    manager = _manager(tmp_path)
+    middleware = SkillMetricsMiddleware(manager)
+    first, record = _completed_state(manager)
+    second, _ = _completed_state(manager)
+
+    assert first["skills"]["run_id"] != second["skills"]["run_id"]
+    assert middleware.after_agent(first, Runtime()) is not None
+    assert middleware.after_agent(second, Runtime()) is not None
+    metrics = manager.store.get_metrics(record.skill_id)
+    assert metrics is not None
+    assert metrics.completed_runs == 2
+    manager.close()

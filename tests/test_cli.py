@@ -231,7 +231,9 @@ tools: [read_page]
     assert main(["skills", "validate"]) == 0
     assert "校验完成：1 个有效，0 个无效" in capsys.readouterr().out
     assert main(["skills", "list"]) == 0
-    assert "verify [verify__" in capsys.readouterr().out
+    list_output = capsys.readouterr().out
+    assert "verify [verify__" in list_output
+    first_id = list_output.split("[", 1)[1].split("]", 1)[0]
     assert main(["skills", "show", "verify"]) == 0
     assert "优先查看一手来源" in capsys.readouterr().out
     assert main(["skills", "disable", "verify"]) == 0
@@ -240,3 +242,24 @@ tools: [read_page]
     assert "disabled" in capsys.readouterr().out
     assert main(["skills", "history", "verify"]) == 0
     assert "active" in capsys.readouterr().out
+
+    (skill_dir / "SKILL.md").write_text(
+        """---
+name: verify
+description: 核验来源第二版
+version: 2
+---
+使用更新后的核验流程。
+""",
+        encoding="utf-8",
+    )
+    assert main(["skills", "list"]) == 0
+    assert "v2 enabled" in capsys.readouterr().out
+    assert main(["skills", "history", "verify"]) == 0
+    assert capsys.readouterr().out.count("verify [verify__") == 2
+    assert main(["skills", "rollback", first_id]) == 0
+    assert f"已切换激活版本：{first_id}" in capsys.readouterr().out
+    assert main(["skills", "history", "verify"]) == 0
+    history_output = capsys.readouterr().out
+    assert f"[{first_id}] v1 disabled" in history_output
+    assert history_output.splitlines()[0].endswith("* active")

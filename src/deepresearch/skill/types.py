@@ -129,6 +129,7 @@ class SkillRef(TypedDict, total=False):
 class SkillRuntimeState(TypedDict, total=False):
     """Checkpoint-safe per-run view of selection and injection activity."""
 
+    run_id: str
     query_hash: str | None
     catalog_hash: str | None
     selected: list[SkillRef]

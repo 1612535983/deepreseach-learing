@@ -18,5 +18,10 @@ def resolve_skill_run_id(state: Mapping[str, Any], runtime: object) -> str:
             return str(thread_id)
     except (AttributeError, TypeError):
         pass
+    skills = state.get("skills")
+    if isinstance(skills, Mapping):
+        run_id = skills.get("run_id")
+        if run_id:
+            return str(run_id)
     question = str(state.get("research_question") or "uncheckpointed")
     return hashlib.sha256(question.encode("utf-8")).hexdigest()[:16]
