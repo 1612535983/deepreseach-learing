@@ -11,7 +11,7 @@
 [![Tests](https://github.com/1612535983/deepreseach-learing/actions/workflows/tests.yml/badge.svg)](https://github.com/1612535983/deepreseach-learing/actions/workflows/tests.yml)
 ![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)
 ![LangGraph](https://img.shields.io/badge/LangGraph-Stateful_Agent-1C3C3C)
-![Tests](https://img.shields.io/badge/tests-242_passed-2EA44F)
+![Tests](https://img.shields.io/badge/tests-291_passed-2EA44F)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 [快速开始](#快速开始) · [工作流程](#工作流程) · [核心设计](#核心设计) · [Skill](#skill-系统) · [学习路线](#分阶段实现路线) · [示例报告](examples/sample-report.md)
@@ -33,6 +33,7 @@ DeepResearch Agent 是一个面向学习与工程实践的 LangGraph 研究 Agen
 - 在上下文接近上限时外化、压缩并强制收尾；
 - 在不同任务之间按需召回长期记忆。
 - 按任务选择版本化 Skill，把“如何研究”作为受预算控制的过程知识注入模型。
+- 用 Jev 输出报告质量与证据充分性的概率，并以有界 Gate 控制是否继续研究。
 
 > [!NOTE]
 > 这是一个围绕 LangGraph 自主搭建的学习型工程项目。设计过程中对照过多个开源 Agent 的
@@ -46,7 +47,7 @@ DeepResearch Agent 是一个面向学习与工程实践的 LangGraph 研究 Agen
 | **输入** | 一个非空自然语言问题，例如“LangChain Agent 如何工作？” |
 | **输出** | 最终回答、完整 `ResearchState`、任务 `thread_id`，以及可选 Markdown 报告 |
 | **适合** | 技术调研、概念梳理、需要网页证据和引用的开放问题 |
-| **暂不保证** | 来源内容一定真实、语义结论一定正确；当前依靠规则检查完整性，不代替事实核验 |
+| **暂不保证** | 来源内容一定真实、语义结论一定正确；规则与 Jev 概率评估都不代替人工事实核验 |
 
 ## 核心能力
 
@@ -54,7 +55,9 @@ DeepResearch Agent 是一个面向学习与工程实践的 LangGraph 研究 Agen
 |---|---|---|
 | 计划、搜索、正文读取、证据聚合、引用校验、报告生成 | SQLite Checkpoint、`thread_id` 隔离、流式事件、任务恢复 | Token 观测、P1 外化、P4 摘要压缩、P5 强制收尾 |
 | **🧠 长期记忆** | **🧩 Skill 系统** | **✅ 工程质量** |
-| Markdown truth store、BM25 召回、衰减、软遗忘、后台巩固 | `SKILL.md`、不可变版本、BM25 选择、预算注入、效果指标 | 242 个测试、离线 Demo、GitHub Actions、模块化 Middleware |
+| Markdown truth store、BM25 召回、衰减、软遗忘、后台巩固 | `SKILL.md`、不可变版本、BM25 选择、预算注入、效果指标 | 291 个测试、离线 Demo、GitHub Actions、模块化 Middleware |
+| **🎯 概率评估** | **🔁 语义 Reflection** | **📊 评估遥测** |
+| 相关性、证据支持、引用充分、证据足够概率与来源质量分 | Shadow 安全观测、Gate 有限回跳、P5 优先收尾 | Checkpoint、事件、Trace 中的延迟、Token、成本与质量分 |
 
 ## 工作流程
 
@@ -67,7 +70,9 @@ flowchart LR
     E --> F{质量检查}
     F -->|仍有缺口| C
     F -->|条件满足| G[生成并校验报告]
-    G --> H[ResearchResult / Markdown]
+    G --> M{Jev 概率评估}
+    M -->|通过| H[ResearchResult / Markdown]
+    M -->|继续研究 / 修改报告| C
 
     I[(SQLite Checkpoint)] -.保存与恢复.-> B
     J[(长期记忆)] -.召回与巩固.-> E
@@ -75,7 +80,7 @@ flowchart LR
     K[Context Governance] -.外化 / 压缩 / 收尾.-> F
 ```
 
-当前版本已完成 **阶段 11：Skill 系统**。上下文占用达到 40% 后执行 P1 外化；达到 80%
+当前版本已完成 **阶段 12：概率与评估层**。上下文占用达到 40% 后执行 P1 外化；达到 80%
 后先保存可验证 Snapshot，再用结构化摘要替换较旧历史；达到 90% 后进入 P5 收尾模式，
 禁止继续扩张研究。P2、P3 当前用于治理观测，尚未单独改写上下文。
 
@@ -99,6 +104,7 @@ create_agent() 编译 Agent Graph
     ├── reflection_attempts / research_gaps
     ├── sources / observations
     ├── final_report
+    ├── evaluation.report（概率、质量分、动作、延迟、Token、成本）
     ├── governance.context
     │   ├── 当前 Token / 上下文窗口 / 占用比例
     │   ├── 累计 Token / 模型调用次数
@@ -168,6 +174,13 @@ ReflectionMiddleware 程序化检查
     └── 存在缺口 → 写入 research_gaps → 回到模型（最多 2 次）
                                                     ↓
                                       超过上限后保留缺口并允许结束
+    ↓
+ReportEvaluationMiddleware（可选 Jev）
+    ├── 一次批量评估回答相关、证据支持、引用充分、证据足够、是否继续研究
+    ├── Shadow → 只记录结果，不改变路由
+    ├── Gate → continue_research / revise_report 最多回跳配置次数
+    ├── 相同报告与证据签名不重复调用
+    └── Provider 失败 fail-open；P5 收尾优先，不再扩张任务
     ↓
 ResearchResult(question, answer, state)
     ↓ 可选 --output
@@ -245,6 +258,12 @@ flowchart TB
         SKILLCONTEXT[Bounded Skill Context]
     end
 
+    subgraph EvaluationLayer[Probabilistic Evaluation]
+        EVAL[Bounded Report Evaluator]
+        JEV[Jev Decision Provider]
+        GATE[Shadow / Bounded Gate]
+    end
+
     GRAPH <--> STATE
     STATE <--> CHECKPOINT
     MIDDLEWARE --> EVIDENCE
@@ -256,6 +275,8 @@ flowchart TB
     MIDDLEWARE --> SELECTOR
     SELECTOR <--> SKILLSTORE
     SKILLSTORE --> SKILLCONTEXT --> TAGGED
+    STATE --> EVAL --> JEV --> GATE
+    GATE -.有限回跳.-> GRAPH
 ```
 
 这里有两条刻意分开的持久化路径：Checkpoint 保存“同一个任务如何继续运行”，长期记忆保存
@@ -362,11 +383,12 @@ uv run deepresearch inspect research-001
 
 `inspect` 会显示原问题、Checkpoint 时间、Graph 步骤、计划进度、研究统计，以及保存在
 Checkpoint State 中的模型名称、上下文窗口、当前 Token、占用比例、累计 Token、模型调用
-次数、`pending_stages`、P1 外化数量和预计节省 Token。同步 Graph 使用 `SqliteSaver`，异步 Graph 使用
+次数、`pending_stages`、P1 外化数量、预计节省 Token，以及 Jev 质量分、动作、调用延迟、
+Token 和成本。同步 Graph 使用 `SqliteSaver`，异步 Graph 使用
 `AsyncSqliteSaver`。不要让两个进程同时用同一个 `thread_id` 执行；不同任务应使用不同 ID。
 
 `--show-trace` 中的统计不调用 LLM；它直接读取 `search_records`、`page_records`、
-`sources`、`observations` 和 `governance.context`，用于区分真实执行记录与模型生成的
+`sources`、`observations`、`governance.context` 和 `evaluation.report`，用于区分真实执行记录与模型生成的
 自然语言说明。
 
 启用 Skill 后，可以先验证和查看目录，再运行任务：
@@ -388,6 +410,34 @@ uv run deepresearch run "核验这项声明并给出来源" --skill source-verif
 BM25 排序，不额外消耗一次模型调用。`skills history/enable/disable/rollback` 用于查看版本、
 切换启用状态和回滚激活版本。
 
+建议先用 Jev 的 Shadow 模式收集数据，不改变 Agent 路由：
+
+```dotenv
+DEEPRESEARCH_EVALUATION_USE=jev
+DEEPRESEARCH_EVALUATION_MODE=shadow
+DEEPRESEARCH_JEV_API_KEY=your-typesafe-api-key
+```
+
+每个“报告 + 证据”版本只发起一次批量评估，得到回答相关、证据支持、引用充分、证据足够和继续研究
+五个概率，以及来源质量分。发送给 Provider 的不是完整 `ResearchState`：Payload 只包含研究问题、
+最终报告、报告声明引用的来源、这些来源对应的有限条 Observation 和计划摘要，并同时受总字符数、
+报告长度、证据条数和单条证据长度限制。消息历史、长期记忆和 Skill 正文不会发送。
+
+在 Shadow 的真实运行数据上确认阈值后，可以启用有界 Gate：
+
+```dotenv
+DEEPRESEARCH_EVALUATION_MODE=gate
+DEEPRESEARCH_EVALUATION_MAX_GATE_ATTEMPTS=1
+DEEPRESEARCH_EVALUATION_EVIDENCE_SUFFICIENCY_THRESHOLD=0.70
+DEEPRESEARCH_EVALUATION_CONTINUE_RESEARCH_THRESHOLD=0.70
+```
+
+Gate 只对 `continue_research` 和 `revise_report` 回跳模型；`pass` 正常结束，低置信或矛盾结果
+标记为 `review_required` 后结束。报告和证据的哈希签名保证同一版本不会重复收费，达到 Gate 上限
+或上下文进入 P5 时也不会继续扩张。Provider 超时、响应不合法或网络失败采用 fail-open，错误类型
+写入 State，但研究结果仍可返回。概率是评估模型的判断，不是事实正确率；上线阈值应使用带人工标签
+的样本做校准和回归测试。
+
 `run` 模式会把 `web_search` 和 `read_page` 注册给真实模型；模型可以先搜索，
 再选择重要来源读取正文。`write_research_plan` 和 `update_plan_step` 负责创建并推进计划。
 研究完成后，模型必须调用 `write_final_report`，并提交 Markdown 内容和实际引用的 URL。
@@ -400,6 +450,10 @@ Plan 和 `current_step_id` 的 Tool 逐轮执行，避免多个 `Command` 同时
 `ReflectionMiddleware` 在模型不再调用 Tool、准备结束时读取 State，检查计划是否完成、
 来源和 Observation 是否达到最小数量、是否成功读取过网页正文。检查不调用额外 LLM；
 如果不满足，会把缺口交给下一轮模型，但最多回跳 2 次，避免无限循环。
+`ReportEvaluationMiddleware` 只在上述确定性检查通过且报告已经保存后运行。它通过 Provider-neutral
+接口调用 Jev，一次提交五个 `Noul` 问题和一个 `Score` 问题；Shadow 结果只进入 State，Gate
+结果才会以 `<report_evaluation>` 投影给下一轮模型。评估结果由 Checkpointer 自动持久化，
+`--stream`、`--show-trace` 和 `inspect` 都可查看质量分、动作、延迟、Token 与成本。
 `ContextGovernanceMiddleware` 在每次模型调用后统计当前消息 Token、识别模型上下文窗口、
 累计供应商返回的 Token usage，并按 P1～P5 阈值写入 `governance.context`。它也会在模型
 调用前重新测量最终标签化请求，使刚进入 State 的 Tool 结果能在发送给下一轮模型前触发治理。
@@ -433,16 +487,17 @@ deepresearch-agent/
 │   ├── context/             # Token、窗口、外化、快照和摘要策略
 │   ├── memory/              # 长期记忆 Schema、存储、检索与 Worker
 │   ├── skill/               # Skill 解析、版本仓库、选择、注入和指标
-│   ├── middlewares/         # 证据、反思、治理、记忆等横切逻辑
+│   ├── evaluation/          # Jev Provider、受控 Payload、概率合成与契约
+│   ├── middlewares/         # 证据、反思、评估、治理、记忆等横切逻辑
 │   └── tools/               # 搜索、网页读取、计划和最终报告
-├── tests/                   # 242 个自动化测试
+├── tests/                   # 291 个自动化测试
 ├── examples/                # 可公开查看的输出样例
 ├── .github/workflows/       # GitHub Actions 自动测试
 └── pyproject.toml           # 依赖、脚本入口与打包配置
 ```
 
 第一次阅读代码，建议按
-`cli.py → agent.py → state.py → tools/ → middlewares/ → context/ → memory/ → skill/`
+`cli.py → agent.py → state.py → tools/ → middlewares/ → context/ → memory/ → skill/ → evaluation/`
 的顺序理解。先看输入如何进入系统，再看状态如何流动，会比从某个复杂 Middleware 开始容易。
 
 ## 名词解释
@@ -456,7 +511,10 @@ deepresearch-agent/
 - **Middleware**：插在 Agent 生命周期中的横切逻辑，例如模型调用前注入 Skill、工具调用后收集证据。
 - **State**：Graph 节点之间共享的数据，例如消息、来源、研究计划和最终报告。
 - **上下文投影**：从完整 State 中筛选当前模型真正需要的字段；本项目只投影计划和聚合进度，不投影全部内部数据。
-- **反思（Reflection）**：模型准备结束时进行质量检查。当前版本是可测试的程序规则，不是再调用一次 LLM 自我评价。
+- **反思（Reflection）**：模型准备结束时进行质量检查。第一层是确定性程序规则；启用 Jev Gate 后，第二层使用受控概率判断证据是否足够。
+- **Jev**：TypeSafe AI 的概率决策模型。本项目把它封装为可替换的 `DecisionProvider`，不让供应商协议侵入 Agent 主流程。
+- **Noul**：Jev 输出 0～1 连续概率的题型；本项目用它表达“回答相关”“证据足够”等语义判断。
+- **Shadow / Gate**：Shadow 只观测和记录，不改变结果；Gate 可依据阈值回跳，但受次数上限和 P5 约束。
 - **回跳（jump_to）**：Middleware 返回的图路由指令。`jump_to="model"` 表示当前不结束，重新执行模型节点。
 - **Markdown**：一种纯文本格式。LLM 生成 Markdown 字符串，Python 再把字符串写入 `.md` 文件。
 - **ResearchEvent**：由 LangGraph 原始更新转换出的稳定应用事件，用于 CLI，未来也可以用于 SSE 或 WebSocket。
@@ -493,8 +551,9 @@ deepresearch-agent/
 16. **阶段 9E（已完成）— P5 强制收尾**：高占用时拦截扩张型 Tool，引导模型生成最终产物，并用有界停止避免死循环。
 17. **阶段 10（已完成）— 记忆系统**：使用独立 Markdown truth store、BM25 召回、惰性衰减、软遗忘和后台巩固，实现跨任务长期记忆。
 18. **阶段 11（已完成）— Skill**：解析 Poirot 风格的 `SKILL.md`，用不可变版本仓库、确定性选择、预算注入、Checkpoint 引用和效果指标管理过程知识。
-19. **阶段 12 — 概率与评估层**：引入 Jev 一类的概率输出/校准能力，优先评估来源可信度、证据覆盖率、报告声明置信度和 Skill 路由质量。
-20. **后续阶段**：错误恢复与预算、MCP、Sandbox、API/前端，最后再考虑多 Agent。
+19. **阶段 12（已完成）— 概率与评估层**：使用 Provider-neutral 接口接入 Jev，批量评估回答相关性、证据支持、引用充分性、证据充分性、继续研究概率和来源质量；支持 Shadow、有限 Gate、Checkpoint 与完整遥测。
+20. **阶段 13 — 评估数据集与概率校准**：积累人工标签，计算 Brier Score、ECE、阈值回归和质量/成本 Pareto，避免直接把模型概率当成事实正确率。
+21. **后续阶段**：错误恢复与预算、MCP、Sandbox、API/前端，最后再考虑多 Agent。
 
 ## Git 管理建议
 
@@ -529,6 +588,7 @@ git commit -m "feat: add web search tool"
 | 任务恢复与长期记忆如何区分 | SQLite Checkpoint 恢复同一 Graph；Markdown truth store 保存跨任务记忆，两条数据链互不替代 | Checkpoint 使用 LangGraph 能力；“运行状态与跨会话记忆分层”也是 DeerFlow 等 long-horizon harness 的通用设计 |
 | 记忆如何存取 | `episodic / semantic / procedural` 三类 Trace，Markdown 持久化，BM25 + strength 召回，惰性衰减、软遗忘和后台巩固 | DeerFlow 2.0 当前强调可插拔 Memory backend；本项目选择更小、更透明的本地实现，不依赖向量数据库，也不声称兼容 DeerMem |
 | 过程知识如何复用 | Poirot 风格的 `SKILL.md` 契约；SQLite 保存元数据和指标，内容寻址对象保存不可变正文；State 只保存版本引用 | 参考 Poirot 的工程分层思路，但解析契约、选择器、P4/P5 预算策略、CLI 和测试均由本项目实现 |
+| 概率判断如何进入主流程 | Provider-neutral evaluator 只接收有界报告/证据投影；默认 Shadow，Gate 有次数上限、签名幂等、fail-open 和 P5 优先级 | Jev 的题型和 API 参考 [TypeSafe AI 官方文档](https://docs.typesafe.ai/introduction)；Payload、阈值、路由和可观察性是本项目实现 |
 
 > [!IMPORTANT]
 > DeerFlow 是包含 Harness、App、Sub-agent、Sandbox、Skills、MCP 和多种 Memory backend 的完整系统。
@@ -620,7 +680,8 @@ Metrics 记录 selection / injection / aligned tool call / outcome
 uv run pytest -q
 ```
 
-当前测试覆盖 Agent 执行、工具、Middleware、Checkpoint、流式事件、上下文治理、长期记忆和 Skill。
+当前测试覆盖 Agent 执行、工具、Middleware、Checkpoint、流式事件、上下文治理、长期记忆、
+Skill、Jev 协议适配、报告概率评估和有界 Gate。
 每次 push 或 pull request 也会通过 GitHub Actions 在 Python 3.12 上自动执行测试。
 
 欢迎通过 Issue 提交 Bug、文档建议或可复现的改进想法。提交代码前请保证：
