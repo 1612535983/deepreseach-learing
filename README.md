@@ -11,10 +11,10 @@
 [![Tests](https://github.com/1612535983/deepreseach-learing/actions/workflows/tests.yml/badge.svg)](https://github.com/1612535983/deepreseach-learing/actions/workflows/tests.yml)
 ![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)
 ![LangGraph](https://img.shields.io/badge/LangGraph-Stateful_Agent-1C3C3C)
-![Tests](https://img.shields.io/badge/tests-184_passed-2EA44F)
+![Tests](https://img.shields.io/badge/tests-242_passed-2EA44F)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[快速开始](#快速开始) · [工作流程](#工作流程) · [核心设计](#核心设计) · [学习路线](#分阶段实现路线) · [示例报告](examples/sample-report.md)
+[快速开始](#快速开始) · [工作流程](#工作流程) · [核心设计](#核心设计) · [Skill](#skill-系统) · [学习路线](#分阶段实现路线) · [示例报告](examples/sample-report.md)
 
 </div>
 
@@ -32,6 +32,7 @@ DeepResearch Agent 是一个面向学习与工程实践的 LangGraph 研究 Agen
 - 用 Checkpoint 保存任务，使进程中断后仍能继续；
 - 在上下文接近上限时外化、压缩并强制收尾；
 - 在不同任务之间按需召回长期记忆。
+- 按任务选择版本化 Skill，把“如何研究”作为受预算控制的过程知识注入模型。
 
 > [!NOTE]
 > 这是一个围绕 LangGraph 自主搭建的学习型工程项目。设计过程中对照过多个开源 Agent 的
@@ -52,8 +53,8 @@ DeepResearch Agent 是一个面向学习与工程实践的 LangGraph 研究 Agen
 | 🔎 研究闭环 | 🧭 可恢复执行 | 📐 上下文治理 |
 |---|---|---|
 | 计划、搜索、正文读取、证据聚合、引用校验、报告生成 | SQLite Checkpoint、`thread_id` 隔离、流式事件、任务恢复 | Token 观测、P1 外化、P4 摘要压缩、P5 强制收尾 |
-| **🧠 长期记忆** | **🛡️ 安全边界** | **✅ 工程质量** |
-| Markdown truth store、BM25 召回、衰减、软遗忘、后台巩固 | SSRF 防护、重定向复检、响应体限制、密钥隔离 | 184 个测试、离线 Demo、GitHub Actions、模块化 Middleware |
+| **🧠 长期记忆** | **🧩 Skill 系统** | **✅ 工程质量** |
+| Markdown truth store、BM25 召回、衰减、软遗忘、后台巩固 | `SKILL.md`、不可变版本、BM25 选择、预算注入、效果指标 | 242 个测试、离线 Demo、GitHub Actions、模块化 Middleware |
 
 ## 工作流程
 
@@ -70,10 +71,11 @@ flowchart LR
 
     I[(SQLite Checkpoint)] -.保存与恢复.-> B
     J[(长期记忆)] -.召回与巩固.-> E
+    L[(Skill Registry)] -.过程知识.-> B
     K[Context Governance] -.外化 / 压缩 / 收尾.-> F
 ```
 
-当前版本已完成 **阶段 10：长期记忆**。上下文占用达到 40% 后执行 P1 外化；达到 80%
+当前版本已完成 **阶段 11：Skill 系统**。上下文占用达到 40% 后执行 P1 外化；达到 80%
 后先保存可验证 Snapshot，再用结构化摘要替换较旧历史；达到 90% 后进入 P5 收尾模式，
 禁止继续扩张研究。P2、P3 当前用于治理观测，尚未单独改写上下文。
 
@@ -102,6 +104,7 @@ create_agent() 编译 Agent Graph
     │   ├── 累计 Token / 模型调用次数
     │   └── pending_stages / hard_limit_reached
     ├── tagged_context（最后一次模型可见上下文的审计快照）
+    ├── skills（选中的不可变版本引用与运行指标）
     └── SQLite Checkpointer（按 thread_id 持久化快照）
     ↓
 ContextGovernanceMiddleware 调用模型前测量完整请求并判断 P1～P5
@@ -120,6 +123,7 @@ ContextCompactionMiddleware 执行 P4
 TaggedContextMiddleware 组装 request-scoped 模型视图
     ├── <system> / <goal> / <date>
     ├── <research_plan> / <research_progress> / <research_gaps>
+    ├── <skill_context> / <memory_context>
     └── <turn> / <answer> / <toolcall> / <toolresult>
     ↓
 SequentialToolCallMiddleware 禁止并行 Tool Call
@@ -235,6 +239,12 @@ flowchart TB
         WORKER[Bounded Extraction Worker]
     end
 
+    subgraph SkillLayer[Versioned Process Knowledge]
+        SELECTOR[BM25 Selector]
+        SKILLSTORE[(SQLite Registry + Immutable Objects)]
+        SKILLCONTEXT[Bounded Skill Context]
+    end
+
     GRAPH <--> STATE
     STATE <--> CHECKPOINT
     MIDDLEWARE --> EVIDENCE
@@ -243,6 +253,9 @@ flowchart TB
     MIDDLEWARE <--> RETRIEVER
     RETRIEVER <--> STORE
     WORKER --> STORE
+    MIDDLEWARE --> SELECTOR
+    SELECTOR <--> SKILLSTORE
+    SKILLSTORE --> SKILLCONTEXT --> TAGGED
 ```
 
 这里有两条刻意分开的持久化路径：Checkpoint 保存“同一个任务如何继续运行”，长期记忆保存
@@ -356,6 +369,25 @@ Checkpoint State 中的模型名称、上下文窗口、当前 Token、占用比
 `sources`、`observations` 和 `governance.context`，用于区分真实执行记录与模型生成的
 自然语言说明。
 
+启用 Skill 后，可以先验证和查看目录，再运行任务：
+
+```dotenv
+DEEPRESEARCH_SKILL_USE=default
+DEEPRESEARCH_SKILL_DIRS=skills
+DEEPRESEARCH_SKILL_INCLUDE_BUILTIN=true
+```
+
+```bash
+uv run deepresearch skills validate
+uv run deepresearch skills list
+uv run deepresearch skills show source-verification
+uv run deepresearch run "核验这项声明并给出来源" --skill source-verification
+```
+
+`--skill` 是显式覆盖，可重复使用；没有覆盖时，Selector 使用问题与 Skill 元数据做确定性
+BM25 排序，不额外消耗一次模型调用。`skills history/enable/disable/rollback` 用于查看版本、
+切换启用状态和回滚激活版本。
+
 `run` 模式会把 `web_search` 和 `read_page` 注册给真实模型；模型可以先搜索，
 再选择重要来源读取正文。`write_research_plan` 和 `update_plan_step` 负责创建并推进计划。
 研究完成后，模型必须调用 `write_final_report`，并提交 Markdown 内容和实际引用的 URL。
@@ -400,16 +432,17 @@ deepresearch-agent/
 │   ├── checkpointing.py     # SQLite Checkpoint 与任务恢复
 │   ├── context/             # Token、窗口、外化、快照和摘要策略
 │   ├── memory/              # 长期记忆 Schema、存储、检索与 Worker
+│   ├── skill/               # Skill 解析、版本仓库、选择、注入和指标
 │   ├── middlewares/         # 证据、反思、治理、记忆等横切逻辑
 │   └── tools/               # 搜索、网页读取、计划和最终报告
-├── tests/                   # 184 个自动化测试
+├── tests/                   # 242 个自动化测试
 ├── examples/                # 可公开查看的输出样例
 ├── .github/workflows/       # GitHub Actions 自动测试
 └── pyproject.toml           # 依赖、脚本入口与打包配置
 ```
 
 第一次阅读代码，建议按
-`cli.py → agent.py → state.py → tools/ → middlewares/ → context/ → memory/`
+`cli.py → agent.py → state.py → tools/ → middlewares/ → context/ → memory/ → skill/`
 的顺序理解。先看输入如何进入系统，再看状态如何流动，会比从某个复杂 Middleware 开始容易。
 
 ## 名词解释
@@ -459,8 +492,9 @@ deepresearch-agent/
 15. **阶段 9D（已完成）— P4 Snapshot 与摘要压缩**：保存带校验的压缩前快照，用结构化摘要替换旧上下文，并保证最近消息和 Tool 配对完整。
 16. **阶段 9E（已完成）— P5 强制收尾**：高占用时拦截扩张型 Tool，引导模型生成最终产物，并用有界停止避免死循环。
 17. **阶段 10（已完成）— 记忆系统**：使用独立 Markdown truth store、BM25 召回、惰性衰减、软遗忘和后台巩固，实现跨任务长期记忆。
-18. **阶段 11 — Skill**：在上下文预算内加载“如何检索、核验来源、写报告”的过程知识。
-19. **后续阶段**：错误恢复与预算、评估、MCP、Sandbox、API/前端，最后再考虑多 Agent。
+18. **阶段 11（已完成）— Skill**：解析 Poirot 风格的 `SKILL.md`，用不可变版本仓库、确定性选择、预算注入、Checkpoint 引用和效果指标管理过程知识。
+19. **阶段 12 — 概率与评估层**：引入 Jev 一类的概率输出/校准能力，优先评估来源可信度、证据覆盖率、报告声明置信度和 Skill 路由质量。
+20. **后续阶段**：错误恢复与预算、MCP、Sandbox、API/前端，最后再考虑多 Agent。
 
 ## Git 管理建议
 
@@ -494,10 +528,12 @@ git commit -m "feat: add web search tool"
 | 上下文如何保持可审计 | 原始 State 保留，模型每轮只接收 request-scoped Tagged Context；压缩失败或未节省 Token 时不替换历史 | 与 DeerFlow 的“只给模型当前工作集”原则方向一致，但标签协议、治理阶段和失败回退是本项目自己的实现 |
 | 任务恢复与长期记忆如何区分 | SQLite Checkpoint 恢复同一 Graph；Markdown truth store 保存跨任务记忆，两条数据链互不替代 | Checkpoint 使用 LangGraph 能力；“运行状态与跨会话记忆分层”也是 DeerFlow 等 long-horizon harness 的通用设计 |
 | 记忆如何存取 | `episodic / semantic / procedural` 三类 Trace，Markdown 持久化，BM25 + strength 召回，惰性衰减、软遗忘和后台巩固 | DeerFlow 2.0 当前强调可插拔 Memory backend；本项目选择更小、更透明的本地实现，不依赖向量数据库，也不声称兼容 DeerMem |
+| 过程知识如何复用 | Poirot 风格的 `SKILL.md` 契约；SQLite 保存元数据和指标，内容寻址对象保存不可变正文；State 只保存版本引用 | 参考 Poirot 的工程分层思路，但解析契约、选择器、P4/P5 预算策略、CLI 和测试均由本项目实现 |
 
 > [!IMPORTANT]
 > DeerFlow 是包含 Harness、App、Sub-agent、Sandbox、Skills、MCP 和多种 Memory backend 的完整系统。
-> 本项目目前是单 Agent、CLI 优先的研究内核，尚未实现这些生产级能力；README 不把路线图当成已完成功能。
+> 本项目目前是单 Agent、CLI 优先的研究内核，已经实现本地 Skill 和 Memory，但尚未实现
+> Sub-agent、Sandbox、MCP 与完整 Web App；README 不把路线图当成已完成功能。
 
 ## 长期记忆
 
@@ -518,6 +554,64 @@ DEEPRESEARCH_MEMORY_ENABLE_EXTRACT=false
 提交给有界 Worker，由模型提取 episodic/semantic/procedural 记忆；Manager 本身
 不调用模型。`deepresearch inspect <thread_id>` 会同时显示本轮召回指标和外部记忆库统计。
 
+## Skill 系统
+
+Skill 解决的是“Agent 应该怎样完成某类任务”，Tool 解决的是“Agent 能执行什么动作”。
+本系统的输入是一个或多个 `SKILL.md`、当前问题和可用 Tool；输出是最多
+`DEEPRESEARCH_SKILL_MAX_SKILLS` 个版本化引用，以及受
+`DEEPRESEARCH_SKILL_TOKEN_BUDGET` 限制的 `<skill_context>`。
+
+一个最小 Skill：
+
+```markdown
+---
+name: source-verification
+description: 核验事实声明和来源
+version: 1
+tags: [来源, 核验]
+tools: [web_search, read_page]
+enabled: true
+---
+# 来源核验
+
+优先读取一手来源，并交叉核验关键结论。
+```
+
+完整执行流程：
+
+```text
+启动扫描 builtin_skills/ 与用户目录
+    ↓
+Parser 校验 frontmatter、正文、大小和路径边界
+    ↓
+SQLite Registry 保存元数据、父版本与效果指标
+Content-addressed Store 保存带 SHA-256 校验的不可变 Markdown
+    ↓
+SkillSelector 根据问题和元数据做 BM25 排序
+    ├── --skill NAME → 强制选择
+    └── 自动选择 → relevance + 可用 Tool 过滤
+    ↓
+ResearchState.skills 只保存 skill_id / hash / score，不复制正文
+    ↓
+SkillContextRenderer 按不可变引用加载正文
+    ├── 超预算 → 先退化为 description，再丢弃
+    ├── P4 → 只投影 description
+    └── P5 → 只保留报告/收尾 Skill
+    ↓
+TaggedContextMiddleware 把 <skill_context> 放入当次模型请求
+    ↓
+Metrics 记录 selection / injection / aligned tool call / outcome
+```
+
+这套结构有三个恢复保证：正文不会写入 canonical messages；Checkpoint 保存的是确切
+`skill_id + content_hash`；源目录出现新版本后，旧任务恢复时仍读取旧的内容对象，不会在任务
+中途悄悄换流程。读取失败、hash 不一致或单个 Skill 无效时采用 fail-open：记录错误并跳过，
+不会阻止 Agent 使用基础研究能力。
+
+项目自带 `web-research`、`source-verification` 和 `evidence-report-writing` 三个 Skill。
+内置目录先加载，用户目录后加载，因此同名用户版本会成为新的激活版本，并保留内置版本作为
+可回滚父版本。Skill 默认关闭，保证升级后旧行为不变。
+
 ## 测试与贡献
 
 运行完整测试：
@@ -526,7 +620,7 @@ DEEPRESEARCH_MEMORY_ENABLE_EXTRACT=false
 uv run pytest -q
 ```
 
-当前测试覆盖 Agent 执行、工具、Middleware、Checkpoint、流式事件、上下文治理和长期记忆。
+当前测试覆盖 Agent 执行、工具、Middleware、Checkpoint、流式事件、上下文治理、长期记忆和 Skill。
 每次 push 或 pull request 也会通过 GitHub Actions 在 Python 3.12 上自动执行测试。
 
 欢迎通过 Issue 提交 Bug、文档建议或可复现的改进想法。提交代码前请保证：
@@ -541,7 +635,8 @@ uv run pytest -q
 项目建立在 [LangChain](https://github.com/langchain-ai/langchain) 与
 [LangGraph](https://github.com/langchain-ai/langgraph) 的公开能力之上；设计过程中也对照了
 [DeerFlow](https://github.com/bytedance/deer-flow)、
-[Open Deep Research](https://github.com/langchain-ai/open_deep_research) 和其他研究 Agent 的
+[Open Deep Research](https://github.com/langchain-ai/open_deep_research)、
+[Poirot](https://github.com/HezaoHezao/poirot) 和其他研究 Agent 的
 公开实现。它们用于理解不同架构选择，不代表本项目与其存在官方关系或一一对应的源码关系。
 完整说明见 [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md)。
 
