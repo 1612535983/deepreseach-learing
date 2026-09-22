@@ -9,6 +9,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
+from langchain_core.language_models import BaseLanguageModel
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
 from deepresearch.context.types import CumulativeTokenUsage, TokenCountMethod
@@ -114,7 +115,15 @@ def estimate_context_tokens(
 
     message_list = list(messages)
     model_counter = getattr(model, "get_num_tokens_from_messages", None)
-    if callable(model_counter):
+    counter_implementation = getattr(
+        type(model),
+        "get_num_tokens_from_messages",
+        None,
+    )
+    uses_generic_counter = (
+        counter_implementation is BaseLanguageModel.get_num_tokens_from_messages
+    )
+    if callable(model_counter) and not uses_generic_counter:
         try:
             token_count = model_counter(message_list)
         except Exception:

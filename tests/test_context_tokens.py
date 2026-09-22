@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from deepresearch.context.tokens import (
@@ -34,6 +35,15 @@ def test_context_estimate_falls_back_to_cjk_aware_character_count() -> None:
         [HumanMessage(content="研究 Agent with tools")],
         FailingTokenCounter(),
     )
+
+    assert estimate.token_count > 0
+    assert estimate.method == "char_estimate"
+
+
+def test_context_estimate_skips_langchain_generic_gpt2_counter() -> None:
+    model = FakeMessagesListChatModel(responses=[AIMessage(content="unused")])
+
+    estimate = estimate_context_tokens([HumanMessage(content="研究上下文")], model)
 
     assert estimate.token_count > 0
     assert estimate.method == "char_estimate"

@@ -26,6 +26,7 @@ from deepresearch.checkpointing import (
 from deepresearch.config import Settings
 from deepresearch.events import ResearchEvent, events_from_update
 from deepresearch.middlewares import (
+    ContextGovernanceMiddleware,
     EvidenceMiddleware,
     PlanContextMiddleware,
     ReflectionMiddleware,
@@ -88,7 +89,7 @@ def build_agent(
 
     resolved_tools = list(tools or [])
     tool_names = {tool.name for tool in resolved_tools}
-    middlewares = []
+    middlewares = [ContextGovernanceMiddleware(model)]
     state_mutating_tools = {
         "write_research_plan",
         "update_plan_step",
