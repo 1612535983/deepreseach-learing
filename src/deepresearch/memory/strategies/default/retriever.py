@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import re
 import time
 from collections import Counter, defaultdict
 from collections.abc import Callable
@@ -14,26 +13,13 @@ from deepresearch.memory.strategies.default.constants import BM25_B, BM25_K1, SI
 from deepresearch.memory.strategies.default.decay import EbbinghausDecayPolicy
 from deepresearch.memory.strategies.default.forget import CompositeForgetPolicy
 from deepresearch.memory.types import MemoryFilter, MemoryQuery, RetrievalResult
-
-
-_WORD_OR_CJK = re.compile(r"[a-zA-Z0-9_]+|[\u3400-\u9fff]+")
+from deepresearch.lexical import tokenize_text
 
 
 def tokenize_memory_text(text: str) -> list[str]:
     """Tokenize English words and Chinese unigrams/bigrams without dependencies."""
 
-    tokens: list[str] = []
-    for match in _WORD_OR_CJK.findall(text.lower()):
-        if match and "\u3400" <= match[0] <= "\u9fff":
-            characters = list(match)
-            tokens.extend(characters)
-            tokens.extend(
-                "".join(characters[index : index + 2])
-                for index in range(len(characters) - 1)
-            )
-        else:
-            tokens.append(match)
-    return tokens
+    return tokenize_text(text)
 
 
 class HybridRetriever:

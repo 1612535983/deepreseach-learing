@@ -1,6 +1,7 @@
 """Versioned process-knowledge bundles for the research agent."""
 
 from deepresearch.skill.config import SkillConfig
+from deepresearch.skill.selector import SkillSelector
 from deepresearch.skill.store import SQLiteSkillStore, SkillStore
 from deepresearch.skill.types import (
     ParsedSkill,
@@ -25,6 +26,7 @@ __all__ = [
     "SkillRef",
     "SkillRuntimeState",
     "SkillSelection",
+    "SkillSelector",
     "SkillStore",
     "SQLiteSkillStore",
 ]
