@@ -31,19 +31,30 @@ URL_B = "https://b.example/article"
 class ProviderStub:
     name = "stub"
 
-    def __init__(self, *, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        error: Exception | None = None,
+        values: dict[str, float] | None = None,
+    ) -> None:
         self.calls = 0
         self.error = error
+        self.values = values or {
+            "answer_relevance": 0.91,
+            "evidence_support": 0.82,
+            "citation_coverage": 0.79,
+            "evidence_sufficient": 0.84,
+            "continue_research": 0.12,
+        }
 
     def _response(self) -> DecisionResponse:
         answers = {
-            "answer_relevance": DecisionAnswer("noul", 0.91),
-            "evidence_support": DecisionAnswer("noul", 0.82),
-            "citation_coverage": DecisionAnswer("noul", 0.79),
-            "evidence_sufficient": DecisionAnswer("noul", 0.84),
-            "continue_research": DecisionAnswer("noul", 0.12),
-            "source_quality": DecisionAnswer("score", 2.7, confidence=0.88),
+            name: DecisionAnswer("noul", value)
+            for name, value in self.values.items()
         }
+        answers["source_quality"] = DecisionAnswer(
+            "score", 2.7, confidence=0.88
+        )
         return DecisionResponse(
             provider="stub",
             model="stub-v1",
@@ -242,3 +253,173 @@ def test_agent_graph_runs_shadow_evaluation_after_report_tool() -> None:
     assert provider.calls == 1, assess_research(final_state)
     assert final_state["evaluation"]["report"]["status"] == "completed"
     assert final_state["evaluation"]["report"]["runtime_action"] == "observed"
+
+
+def test_gate_continues_research_when_semantic_evidence_is_insufficient() -> None:
+    provider = ProviderStub(
+        values={
+            "answer_relevance": 0.9,
+            "evidence_support": 0.8,
+            "citation_coverage": 0.8,
+            "evidence_sufficient": 0.4,
+            "continue_research": 0.91,
+        }
+    )
+    update = _middleware(provider, _config(mode="gate")).after_model(  # type: ignore[arg-type]
+        _ready_state(), None
+    )
+
+    assert update is not None
+    assert update["jump_to"] == "model"
+    report = update["evaluation"]["report"]
+    assert report["recommended_action"] == "continue_research"
+    assert report["runtime_action"] == "continue_research"
+    assert report["gate_attempts"] == 1
+    assert "继续研究概率 91.0%" in update["research_gaps"][0]
+
+
+def test_gate_revises_report_when_report_dimensions_are_weak() -> None:
+    provider = ProviderStub(
+        values={
+            "answer_relevance": 0.6,
+            "evidence_support": 0.5,
+            "citation_coverage": 0.4,
+            "evidence_sufficient": 0.9,
+            "continue_research": 0.2,
+        }
+    )
+    update = _middleware(provider, _config(mode="gate")).after_model(  # type: ignore[arg-type]
+        _ready_state(), None
+    )
+
+    assert update is not None
+    assert update["jump_to"] == "model"
+    report = update["evaluation"]["report"]
+    assert report["runtime_action"] == "revise_report"
+    assert "相关概率 60.0%" in update["research_gaps"][0]
+    assert "再次调用 write_final_report" in update["research_gaps"][0]
+
+
+def test_gate_pass_does_not_add_an_agent_loop() -> None:
+    update = _middleware(ProviderStub(), _config(mode="gate")).after_model(  # type: ignore[arg-type]
+        _ready_state(), None
+    )
+
+    assert update is not None
+    assert update["evaluation"]["report"]["runtime_action"] == "pass"
+    assert "jump_to" not in update
+    assert "research_gaps" not in update
+
+
+def test_gate_respects_attempt_limit_and_p5_finalization() -> None:
+    values = {
+        "answer_relevance": 0.9,
+        "evidence_support": 0.8,
+        "citation_coverage": 0.8,
+        "evidence_sufficient": 0.3,
+        "continue_research": 0.95,
+    }
+    exhausted = _middleware(
+        ProviderStub(values=values),
+        _config(mode="gate", max_gate_attempts=0),
+    ).after_model(_ready_state(), None)  # type: ignore[arg-type]
+    assert exhausted is not None
+    assert exhausted["evaluation"]["report"]["runtime_action"] == "gate_exhausted"
+    assert "jump_to" not in exhausted
+
+    p5_state = _ready_state()
+    p5_state["governance"]["context"]["pending_stages"] = ["P5"]
+    p5 = _middleware(
+        ProviderStub(values=values), _config(mode="gate")
+    ).after_model(p5_state, None)  # type: ignore[arg-type]
+    assert p5 is not None
+    assert p5["evaluation"]["report"]["runtime_action"] == "p5_bypass"
+    assert "p5_forced_finalization" in p5["evaluation"]["report"]["notes"]
+    assert "jump_to" not in p5
+
+
+def test_unchanged_gate_signature_is_not_charged_or_looped_again() -> None:
+    provider = ProviderStub(
+        values={
+            "answer_relevance": 0.9,
+            "evidence_support": 0.8,
+            "citation_coverage": 0.8,
+            "evidence_sufficient": 0.4,
+            "continue_research": 0.9,
+        }
+    )
+    middleware = _middleware(provider, _config(mode="gate"))
+    state = _ready_state()
+    first = middleware.after_model(state, None)  # type: ignore[arg-type]
+    assert first is not None
+    state["evaluation"] = merge_evaluation_state(
+        state["evaluation"], first["evaluation"]
+    )
+
+    second = middleware.after_model(state, None)  # type: ignore[arg-type]
+
+    assert second is not None
+    assert second["evaluation"]["report"]["runtime_action"] == "gate_exhausted"
+    assert "jump_to" not in second
+    assert provider.calls == 1
+
+
+def test_agent_graph_gate_adds_one_bounded_semantic_reflection_loop() -> None:
+    provider = ProviderStub(
+        values={
+            "answer_relevance": 0.9,
+            "evidence_support": 0.8,
+            "citation_coverage": 0.8,
+            "evidence_sufficient": 0.4,
+            "continue_research": 0.9,
+        }
+    )
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "write_final_report",
+                        "args": {
+                            "title": "研究报告",
+                            "report": (
+                                f"结论正文\n\n- [{URL_A}]({URL_A})"
+                                f"\n- [{URL_B}]({URL_B})"
+                            ),
+                            "used_source_urls": [URL_A, URL_B],
+                        },
+                        "id": "report-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(content="初次报告完成。"),
+            AIMessage(content="没有新增证据，结束。"),
+        ]
+    )
+    state = _ready_state()
+    state["messages"] = state["messages"][:1]
+    state["final_report"] = None
+    state["final_report_source_urls"] = []
+    graph = build_agent(
+        model,
+        tools=[
+            write_research_plan_tool,
+            web_search_tool,
+            read_page_tool,
+            write_final_report_tool,
+        ],
+        evaluation_provider=provider,
+        evaluation_config=_config(mode="gate"),
+    )
+
+    final_state = graph.invoke(state)
+
+    assert provider.calls == 1
+    assert final_state["evaluation"]["report"]["gate_attempts"] == 1
+    assert final_state["evaluation"]["report"]["runtime_action"] == "gate_exhausted"
+    ai_messages = [
+        message for message in final_state["messages"] if isinstance(message, AIMessage)
+    ]
+    assert len(ai_messages) == 3

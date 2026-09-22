@@ -124,6 +124,45 @@ def format_research_context(state: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def format_evaluation_context(state: Mapping[str, Any]) -> str:
+    """Render only actionable Gate decisions; Shadow results stay model-invisible."""
+
+    evaluation = state.get("evaluation")
+    report = evaluation.get("report") if isinstance(evaluation, Mapping) else None
+    if not isinstance(report, Mapping) or report.get("mode") != "gate":
+        return ""
+    action = str(report.get("runtime_action") or "")
+    if action not in {"continue_research", "revise_report"}:
+        return ""
+    answers = report.get("answers")
+    answer_map = answers if isinstance(answers, Mapping) else {}
+
+    def probability(name: str) -> str:
+        answer = answer_map.get(name)
+        value = answer.get("value") if isinstance(answer, Mapping) else None
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return f"{float(value):.1%}"
+        return "unknown"
+
+    instruction = (
+        "继续使用 web_search/read_page 补充直接证据，随后重新调用 write_final_report。"
+        if action == "continue_research"
+        else "使用现有证据修订报告相关性、论证和引用，随后重新调用 write_final_report。"
+    )
+    return "\n".join(
+        [
+            f'<report_evaluation mode="gate" action="{escape(action)}">',
+            f'- 回答相关概率：{probability("answer_relevance")}',
+            f'- 证据支持概率：{probability("evidence_support")}',
+            f'- 引用充分概率：{probability("citation_coverage")}',
+            f'- 证据足够概率：{probability("evidence_sufficient")}',
+            f'- 继续研究概率：{probability("continue_research")}',
+            instruction,
+            "</report_evaluation>",
+        ]
+    )
+
+
 @dataclass(frozen=True)
 class AssembledContext:
     """The final request projection plus a human-readable audit rendering."""
@@ -211,6 +250,9 @@ class ContextAssembler:
 
         if include_research_context:
             lines.extend(format_research_context(state).splitlines())
+            evaluation_context = format_evaluation_context(state)
+            if evaluation_context:
+                lines.extend(evaluation_context.splitlines())
 
         if self._skill_context_provider is not None:
             skill_context = self._skill_context_provider(state)

@@ -166,3 +166,53 @@ def test_assembler_includes_optional_memory_context_provider() -> None:
     assert "<memory_context>历史偏好</memory_context>" in str(
         assembled.system_message.content
     )
+
+
+def test_gate_evaluation_is_projected_for_next_model_call() -> None:
+    state = create_initial_state("研究问题")
+    state["evaluation"]["report"].update(
+        {
+            "mode": "gate",
+            "runtime_action": "continue_research",
+            "answers": {
+                "answer_relevance": {"value": 0.8},
+                "evidence_support": {"value": 0.6},
+                "citation_coverage": {"value": 0.7},
+                "evidence_sufficient": {"value": 0.4},
+                "continue_research": {"value": 0.9},
+            },
+        }
+    )
+
+    assembled = assembler().assemble(
+        state,
+        state["messages"],
+        SystemMessage(content="系统规则"),
+        include_research_context=True,
+    )
+    system_text = str(assembled.system_message.content)
+
+    assert '<report_evaluation mode="gate" action="continue_research">' in system_text
+    assert "证据足够概率：40.0%" in system_text
+    assert "继续研究概率：90.0%" in system_text
+    assert "重新调用 write_final_report" in system_text
+
+
+def test_shadow_evaluation_never_changes_model_context() -> None:
+    state = create_initial_state("研究问题")
+    state["evaluation"]["report"].update(
+        {
+            "mode": "shadow",
+            "runtime_action": "observed",
+            "answers": {"evidence_sufficient": {"value": 0.1}},
+        }
+    )
+
+    assembled = assembler().assemble(
+        state,
+        state["messages"],
+        SystemMessage(content="系统规则"),
+        include_research_context=True,
+    )
+
+    assert "<report_evaluation" not in str(assembled.system_message.content)
