@@ -67,6 +67,36 @@ class DecisionResponse:
     latency_ms: int = 0
 
 
+@dataclass(frozen=True)
+class ReportEvaluationPayload:
+    """Bounded provider state plus hashes used for checkpoint idempotency."""
+
+    state: dict[str, Any]
+    report_hash: str
+    evidence_hash: str
+    signature: str
+    input_chars: int
+    notes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ReportEvaluationResult:
+    """Provider answers composed into one application-level recommendation."""
+
+    report_hash: str
+    evidence_hash: str
+    signature: str
+    provider: str
+    model: str
+    answers: dict[str, dict[str, Any]]
+    composite_score: float
+    recommended_action: RecommendedAction
+    input_chars: int
+    latency_ms: int
+    usage: DecisionUsage
+    notes: tuple[str, ...] = ()
+
+
 class ReportEvaluationState(TypedDict, total=False):
     """Serializable evaluation record for the latest final-report version."""
 
