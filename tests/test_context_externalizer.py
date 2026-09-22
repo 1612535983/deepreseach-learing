@@ -148,7 +148,9 @@ def large_result(label: str) -> str:
 
 
 class P1ToolModel(FakeMessagesListChatModel):
-    max_input_tokens: ClassVar[int] = 10_000
+    # Keep this integration focused on P1; P5 now correctly stops the same
+    # expanding Tool once the request reaches 90%.
+    max_input_tokens: ClassVar[int] = 40_000
 
     def bind_tools(self, tools, *, tool_choice=None, **kwargs):  # noqa: ANN001, ANN003
         return self

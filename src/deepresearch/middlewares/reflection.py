@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, override
 
 from langchain.agents.middleware import AgentMiddleware, hook_config
@@ -24,12 +25,25 @@ def _last_ai_message(state: ResearchState) -> AIMessage | None:
     return None
 
 
+def _mapping(value: object) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
 class ReflectionMiddleware(AgentMiddleware):
     """Send an incomplete run back to the model, with a strict retry cap."""
 
     state_schema = ResearchState
 
     def _inspect_after_model(self, state: ResearchState) -> dict[str, Any] | None:
+        governance = _mapping(state.get("governance"))
+        context = _mapping(governance.get("context"))
+        pending = context.get("pending_stages", [])
+        finalization = _mapping(context.get("finalization"))
+        if "P5" in pending or finalization.get("active") is True:
+            # P5 owns termination once the context budget is critical. Reflection
+            # must not create extra model loops that work against forced finalization.
+            return None
+
         last_message = _last_ai_message(state)
         if last_message is None or last_message.tool_calls:
             # A tool call means the agent is still working; let the normal

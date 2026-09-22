@@ -2,9 +2,9 @@
 
 这个项目不是直接复制 Poirot，而是沿着 Poirot 的核心执行链逐层重建：先让最小 Agent 跑通，再按 Git 阶段加入 Tool、Middleware、State、Skill 和其他基础设施。
 
-当前版本是 **阶段 9D：能够执行 P4 Snapshot 与摘要压缩的研究 Agent**。上下文占用达到
+当前版本是 **阶段 9E：具备 P1、P4、P5 上下文治理执行链的研究 Agent**。上下文占用达到
 40% 后先执行 P1 外化；达到 80% 后先保存可验证 Snapshot，再把较旧历史替换成结构化摘要，
-同时保留最近消息和完整 Tool 配对。P5 强制收尾尚未实现：
+同时保留最近消息和完整 Tool 配对；达到 90% 后进入 P5 收尾模式，禁止继续扩张研究：
 
 ```text
 命令行问题
@@ -69,6 +69,12 @@ SequentialToolCallMiddleware 禁止并行 Tool Call
                          └── 正文 observations（关联 step_id）
                                 ↓
                          update_plan_step 推进计划
+    ↓
+ContextFinalizationMiddleware 执行 P5
+    ├── 模型请求扩张型 Tool → 剥离 Tool Call，不进入 ToolNode
+    ├── 注入隐藏收尾提醒 → jump_to="model"
+    ├── 只允许 update_plan_step / write_final_report
+    └── 再次违反 → 有界强制停止，避免无限循环
     ↓
 模型调用 write_final_report
     ↓
@@ -249,6 +255,12 @@ Plan 和 `current_step_id` 的 Tool 逐轮执行，避免多个 `Command` 同时
 LangChain 消息。随后由内部摘要调用压缩较旧前缀，最近约 6 条消息按完整交互单元保留，
 不会拆开 `AIMessage(tool_calls)` 与对应 `ToolMessage`。Snapshot、摘要调用或 Token 缩减校验
 任一步失败，都不会删除原历史。内部摘要调用不计入主 Agent 的 `model_call_count`。
+`ContextFinalizationMiddleware` 消费 P5。它在模型生成 Tool Call 后、ToolNode 执行前检查调用：
+搜索、网页读取、重新建计划和未知 Tool 会被从同 ID 的 `AIMessage` 中剥离，因此不会产生孤立
+`ToolMessage`，也不会真的执行；随后加入一次隐藏收尾提醒并回跳模型。为了兼容本项目的正式报告
+流程，`update_plan_step` 和 `write_final_report` 仍可有限执行。收尾模式一旦触发便在当前任务中
+保持有效，Reflection 不再增加研究轮次；扩张型 Tool 再次违反或收尾 Tool 超过上限时直接停止，
+防止预算保护本身形成死循环。
 `demo` 模式仍使用无工具的 Fake Model，保证在没有网络和 API Key 时也能验证基础链路。
 
 `.env` 已被 `.gitignore` 排除，真实 API Key 不会进入 Git。
@@ -277,6 +289,7 @@ LangChain 消息。随后由内部摘要调用压缩较旧前缀，最近约 6 �
 - **外化（Externalization）**：把大体积内容从模型消息搬到外部文件，消息中只保留预览、文件位置和校验元数据。它减少上下文 Token，但不等同于删除原始结果。
 - **Snapshot**：压缩前保存的可校验恢复点。P4 摘要丢失细节时，仍可通过快照和外化文件追溯原内容。
 - **摘要压缩**：让内部模型把较旧消息转换成结构化摘要，再用 LangGraph 消息 reducer 清理旧前缀并保留最近对话。
+- **强制收尾**：上下文进入 P5 后停止产生新研究材料，只允许整理计划、保存报告或直接基于已有证据作答。
 
 ## 分阶段复现路线
 
@@ -296,8 +309,8 @@ LangChain 消息。随后由内部摘要调用压缩较旧前缀，最近约 6 �
 12. **阶段 9A（已完成）— Context Governance 观测层**：增加治理 State、Token 统计、模型窗口识别、阈值判断、Middleware 记录，以及 Trace/inspect 展示；暂不修改消息。
 13. **阶段 9B（已完成）— Tagged Context**：保留原始 State，同时组装并审计带语义标签的模型请求视图。
 14. **阶段 9C（已完成）— P1 Tool 结果外化**：把较旧的大体积 Tool 结果安全保存到消息之外，只保留预览、引用和校验元数据。
-15. **阶段 9D（当前）— P4 Snapshot 与摘要压缩**：保存带校验的压缩前快照，用结构化摘要替换旧上下文，并保证最近消息和 Tool 配对完整。
-16. **阶段 9E — P5 强制收尾**：高占用时停止继续调用 Tool，引导模型生成最终产物。
+15. **阶段 9D（已完成）— P4 Snapshot 与摘要压缩**：保存带校验的压缩前快照，用结构化摘要替换旧上下文，并保证最近消息和 Tool 配对完整。
+16. **阶段 9E（当前）— P5 强制收尾**：高占用时拦截扩张型 Tool，引导模型生成最终产物，并用有界停止避免死循环。
 17. **阶段 10 — 记忆系统**：区分任务短期记忆和可跨任务检索的长期记忆。
 18. **阶段 11 — Skill**：在上下文预算内加载“如何检索、核验来源、写报告”的过程知识。
 19. **后续阶段**：错误恢复与预算、评估、MCP、Sandbox、API/前端，最后再考虑多 Agent。
@@ -346,6 +359,7 @@ git commit -m "feat: add web search tool"
 | `src/deepresearch/middlewares/context_governance.py` | 上下文治理 Middleware | 每次模型调用后把测量和阈值判断结果写入 State |
 | `src/deepresearch/middlewares/context_externalization.py` | P1 外化 Middleware | 调用模型前消费 P1，并累计外化数量和预计节省 Token |
 | `src/deepresearch/middlewares/context_compaction.py` | P4 压缩 Middleware | 串联 Snapshot、摘要、Token 缩减校验和治理指标更新 |
+| `src/deepresearch/middlewares/context_finalization.py` | P5 收尾 Middleware | 拦截扩张型 Tool Call、允许报告类 Tool，并执行有界收尾 |
 | `src/deepresearch/middlewares/tagged_context.py` | Tagged Context Middleware | 请求前保存审计快照，并只对本次模型请求应用标签化投影 |
 | `src/deepresearch/reporting.py` | 输出层 | 显示 Trace，并把 `final_report` 写成 `.md` 文件 |
 | `build_agent()` | `agents/leader/factory.py` | 编译 Agent Graph |

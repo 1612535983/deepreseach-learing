@@ -55,6 +55,7 @@ def format_governance_summary(state: Mapping[str, Any]) -> str:
     usage = _mapping(context.get("cumulative_usage"))
     externalization = _mapping(context.get("externalization"))
     compaction = _mapping(context.get("compaction"))
+    finalization = _mapping(context.get("finalization"))
     model_name = context.get("model_name")
     if not isinstance(model_name, str) or not model_name.strip():
         model_name = "未知"
@@ -124,6 +125,24 @@ def format_governance_summary(state: Mapping[str, Any]) -> str:
         compaction_error = compaction.get("last_error")
         if isinstance(compaction_error, str) and compaction_error:
             lines.append(f"最近 P4 错误：{compaction_error}")
+    if finalization:
+        lines.append(
+            "P5 收尾："
+            f"{'已触发' if finalization.get('active') is True else '未触发'}；"
+            f"重定向 {_non_negative_int(finalization.get('redirect_count')):,} 次；"
+            "拦截 "
+            f"{_non_negative_int(finalization.get('blocked_tool_call_count')):,} "
+            "个 Tool Call；允许 "
+            f"{_non_negative_int(finalization.get('terminal_tool_call_count')):,} "
+            "个收尾 Tool Call；强制停止 "
+            f"{_non_negative_int(finalization.get('forced_stop_count')):,} 次"
+        )
+        blocked_names = finalization.get("last_blocked_tool_names")
+        if isinstance(blocked_names, list) and blocked_names:
+            lines.append(
+                "最近拦截 Tool："
+                + ", ".join(str(name) for name in blocked_names)
+            )
     return "\n".join(lines)
 
 

@@ -131,7 +131,9 @@ def large_p4_result(label: str) -> str:
 
 
 class P4ToolModel(FakeMessagesListChatModel):
-    max_input_tokens: ClassVar[int] = 10_000
+    # The fourth-result request crosses P4 but remains below P5, so this
+    # integration continues to isolate summary compaction.
+    max_input_tokens: ClassVar[int] = 30_000
 
     def bind_tools(self, tools, *, tool_choice=None, **kwargs):  # noqa: ANN001, ANN003
         return self

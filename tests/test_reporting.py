@@ -165,6 +165,17 @@ def test_format_governance_summary_displays_recorded_metrics() -> None:
                 "last_summary_id": "p4-summary-1",
                 "last_error": None,
             },
+            "finalization": {
+                "active": True,
+                "redirect_count": 1,
+                "blocked_tool_call_count": 2,
+                "terminal_tool_call_count": 1,
+                "forced_stop_count": 0,
+                "last_blocked_tool_names": ["web_search", "read_page"],
+                "last_utilization_ratio": 0.92,
+                "last_reason": "p5_threshold",
+                "last_reminder_id": "p5-reminder-1",
+            },
         }
     }
 
@@ -183,6 +194,9 @@ def test_format_governance_summary_displays_recorded_metrics() -> None:
     assert "P4 压缩：1 次摘要；1 个快照；累计移除 12 条消息" in summary
     assert "预计节省 6,200 Token" in summary
     assert ".deepresearch/snapshots/run/snapshot.json" in summary
+    assert "P5 收尾：已触发；重定向 1 次；拦截 2 个 Tool Call" in summary
+    assert "允许 1 个收尾 Tool Call；强制停止 0 次" in summary
+    assert "最近拦截 Tool：web_search, read_page" in summary
     assert "seen_message_usage" not in summary
 
 

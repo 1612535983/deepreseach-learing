@@ -165,6 +165,7 @@ def test_inspect_reads_sqlite_without_model(monkeypatch, capsys, tmp_path) -> No
     assert "待处理阶段：无" in output
     assert "P1 外化：0 个 Tool 结果；预计节省 0 Token" in output
     assert "P4 压缩：0 次摘要；0 个快照；累计移除 0 条消息" in output
+    assert "P5 收尾：未触发；重定向 0 次；拦截 0 个 Tool Call" in output
 
 
 def test_inspect_reports_missing_thread(monkeypatch, capsys, tmp_path) -> None:  # noqa: ANN001

@@ -29,6 +29,7 @@ from deepresearch.events import ResearchEvent, events_from_update
 from deepresearch.middlewares import (
     ContextCompactionMiddleware,
     ContextExternalizationMiddleware,
+    ContextFinalizationMiddleware,
     ContextGovernanceMiddleware,
     EvidenceMiddleware,
     ReflectionMiddleware,
@@ -105,14 +106,28 @@ def build_agent(
         )
         return [assembled.system_message, *assembled.messages]
 
-    middlewares = [
-        ContextGovernanceMiddleware(
-            model,
-            message_projector=project_model_messages,
-        ),
-        ContextExternalizationMiddleware(),
-        ContextCompactionMiddleware(model),
-    ]
+    research_tool_names = {
+        "write_research_plan",
+        "web_search",
+        "read_page",
+        "write_final_report",
+    }
+    middlewares = [ContextFinalizationMiddleware()]
+    if research_tool_names.issubset(tool_names):
+        # after_model hooks run in reverse registration order. Keeping Reflection
+        # here makes Governance update the latest budget first, then lets P5
+        # suppress reflection loops before final Tool routing is decided.
+        middlewares.append(ReflectionMiddleware())
+    middlewares.extend(
+        [
+            ContextGovernanceMiddleware(
+                model,
+                message_projector=project_model_messages,
+            ),
+            ContextExternalizationMiddleware(),
+            ContextCompactionMiddleware(model),
+        ]
+    )
     state_mutating_tools = {
         "write_research_plan",
         "update_plan_step",
@@ -129,14 +144,6 @@ def build_agent(
     )
     if {"web_search", "read_page"}.intersection(tool_names):
         middlewares.append(EvidenceMiddleware())
-    research_tool_names = {
-        "write_research_plan",
-        "web_search",
-        "read_page",
-        "write_final_report",
-    }
-    if research_tool_names.issubset(tool_names):
-        middlewares.append(ReflectionMiddleware())
     return create_agent(
         model=model,
         tools=resolved_tools,

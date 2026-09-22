@@ -60,6 +60,20 @@ class ContextCompactionMetrics(TypedDict, total=False):
     last_error: str | None
 
 
+class ContextFinalizationMetrics(TypedDict, total=False):
+    """Cumulative P5 activity and the current terminal-mode status."""
+
+    active: bool
+    redirect_count: int
+    blocked_tool_call_count: int
+    terminal_tool_call_count: int
+    forced_stop_count: int
+    last_blocked_tool_names: list[str]
+    last_utilization_ratio: float
+    last_reason: str | None
+    last_reminder_id: str | None
+
+
 class ContextGovernanceState(TypedDict, total=False):
     """Checkpoint-safe measurements and decisions for context governance."""
 
@@ -74,6 +88,7 @@ class ContextGovernanceState(TypedDict, total=False):
     summary: str | None
     summary_id: str | None
     compaction: ContextCompactionMetrics
+    finalization: ContextFinalizationMetrics
 
 
 class GovernanceState(TypedDict, total=False):

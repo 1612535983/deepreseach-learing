@@ -30,6 +30,7 @@ from deepresearch.context.tokens import (
 from deepresearch.context.types import (
     ContextBudget,
     ContextCompactionMetrics,
+    ContextFinalizationMetrics,
     ContextGovernanceState,
     ContextExternalizationMetrics,
     ContextStage,
@@ -50,6 +51,7 @@ __all__ = [
     "ExternalizedToolResult",
     "ContextBudget",
     "ContextCompactionMetrics",
+    "ContextFinalizationMetrics",
     "ContextDecision",
     "ContextExternalizationMetrics",
     "ContextGovernanceState",

@@ -47,6 +47,17 @@ def test_initial_state_contains_complete_serializable_governance() -> None:
         "last_summary_id": None,
         "last_error": None,
     }
+    assert state["governance"]["context"]["finalization"] == {
+        "active": False,
+        "redirect_count": 0,
+        "blocked_tool_call_count": 0,
+        "terminal_tool_call_count": 0,
+        "forced_stop_count": 0,
+        "last_blocked_tool_names": [],
+        "last_utilization_ratio": 0.0,
+        "last_reason": None,
+        "last_reminder_id": None,
+    }
     json.dumps(state["governance"])
 
 
