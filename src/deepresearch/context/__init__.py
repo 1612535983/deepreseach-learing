@@ -1,5 +1,10 @@
 """Typed building blocks for context governance."""
 
+from deepresearch.context.externalizer import (
+    ExternalizationBatch,
+    ExternalizedToolResult,
+    ToolResultExternalizer,
+)
 from deepresearch.context.policy import (
     DEFAULT_CONTEXT_THRESHOLDS,
     ContextDecision,
@@ -15,6 +20,7 @@ from deepresearch.context.tokens import (
 from deepresearch.context.types import (
     ContextBudget,
     ContextGovernanceState,
+    ContextExternalizationMetrics,
     ContextStage,
     CumulativeTokenUsage,
     GovernanceState,
@@ -29,8 +35,11 @@ from deepresearch.context.windows import (
 
 __all__ = [
     "DEFAULT_CONTEXT_THRESHOLDS",
+    "ExternalizationBatch",
+    "ExternalizedToolResult",
     "ContextBudget",
     "ContextDecision",
+    "ContextExternalizationMetrics",
     "ContextGovernanceState",
     "ContextStage",
     "ContextThresholds",
@@ -40,6 +49,7 @@ __all__ = [
     "TokenCountMethod",
     "TokenEstimate",
     "TokenUsageUpdate",
+    "ToolResultExternalizer",
     "collect_usage_delta",
     "estimate_context_tokens",
     "evaluate_context_pressure",

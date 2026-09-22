@@ -64,6 +64,39 @@ def test_middleware_records_budget_policy_and_usage_without_mutating_messages() 
     assert "jump_to" not in update
 
 
+def test_before_model_classifies_new_tool_results_before_the_next_call() -> None:
+    state = create_initial_state("研究上下文")
+    state["messages"].append(
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "read_page",
+                    "args": {"url": "https://example.com"},
+                    "id": "call-1",
+                    "type": "tool_call",
+                }
+            ],
+        )
+    )
+    from langchain_core.messages import ToolMessage
+
+    state["messages"].append(
+        ToolMessage(
+            content="网页正文" * 200,
+            tool_call_id="call-1",
+        )
+    )
+    middleware = ContextGovernanceMiddleware(FixedGovernanceModel())
+
+    update = middleware.before_model(state, None)  # type: ignore[arg-type]
+
+    context = update["governance"]["context"]
+    assert context["budget"]["current_tokens"] == 500
+    assert context["pending_stages"] == ["P1", "P2"]
+    assert "model_call_count" not in context
+
+
 def test_middleware_does_not_count_the_same_usage_twice() -> None:
     state = state_with_usage()
     middleware = ContextGovernanceMiddleware(FixedGovernanceModel())

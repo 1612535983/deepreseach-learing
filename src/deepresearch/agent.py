@@ -9,7 +9,7 @@ from typing import Any, cast
 from langchain.agents import create_agent
 from langchain_core.language_models import BaseChatModel
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -23,9 +23,11 @@ from deepresearch.checkpointing import (
     open_sqlite_checkpointer,
     resolve_checkpoint_run,
 )
+from deepresearch.context.tagged import ContextAssembler
 from deepresearch.config import Settings
 from deepresearch.events import ResearchEvent, events_from_update
 from deepresearch.middlewares import (
+    ContextExternalizationMiddleware,
     ContextGovernanceMiddleware,
     EvidenceMiddleware,
     ReflectionMiddleware,
@@ -90,7 +92,25 @@ def build_agent(
     resolved_tools = list(tools or [])
     tool_names = {tool.name for tool in resolved_tools}
     system_prompt = SEARCH_SYSTEM_PROMPT if resolved_tools else BASE_SYSTEM_PROMPT
-    middlewares = [ContextGovernanceMiddleware(model)]
+    include_research_context = "write_research_plan" in tool_names
+    context_assembler = ContextAssembler()
+
+    def project_model_messages(state: ResearchState) -> list[BaseMessage]:
+        assembled = context_assembler.assemble(
+            state,
+            list(state.get("messages", [])),
+            SystemMessage(content=system_prompt),
+            include_research_context=include_research_context,
+        )
+        return [assembled.system_message, *assembled.messages]
+
+    middlewares = [
+        ContextGovernanceMiddleware(
+            model,
+            message_projector=project_model_messages,
+        ),
+        ContextExternalizationMiddleware(),
+    ]
     state_mutating_tools = {
         "write_research_plan",
         "update_plan_step",
@@ -101,7 +121,8 @@ def build_agent(
     middlewares.append(
         TaggedContextMiddleware(
             system_prompt,
-            include_research_context="write_research_plan" in tool_names,
+            include_research_context=include_research_context,
+            assembler=context_assembler,
         )
     )
     if {"web_search", "read_page"}.intersection(tool_names):

@@ -34,6 +34,17 @@ class CumulativeTokenUsage(TypedDict, total=False):
     total_tokens: int
 
 
+class ContextExternalizationMetrics(TypedDict, total=False):
+    """Cumulative P1 results plus the outcome of the latest attempt."""
+
+    externalized_tool_results: int
+    original_chars: int
+    retained_chars: int
+    estimated_tokens_saved: int
+    last_externalized_paths: list[str]
+    last_error: str | None
+
+
 class ContextGovernanceState(TypedDict, total=False):
     """Checkpoint-safe measurements and decisions for context governance."""
 
@@ -44,6 +55,7 @@ class ContextGovernanceState(TypedDict, total=False):
     pending_stages: list[ContextStage]
     hard_limit_reached: bool
     seen_message_usage: dict[str, CumulativeTokenUsage]
+    externalization: ContextExternalizationMetrics
 
 
 class GovernanceState(TypedDict, total=False):

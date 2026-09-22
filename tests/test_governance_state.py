@@ -25,6 +25,14 @@ def test_initial_state_contains_complete_serializable_governance() -> None:
         "output_tokens": 0,
         "total_tokens": 0,
     }
+    assert state["governance"]["context"]["externalization"] == {
+        "externalized_tool_results": 0,
+        "original_chars": 0,
+        "retained_chars": 0,
+        "estimated_tokens_saved": 0,
+        "last_externalized_paths": [],
+        "last_error": None,
+    }
     json.dumps(state["governance"])
 
 

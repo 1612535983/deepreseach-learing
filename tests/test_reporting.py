@@ -139,6 +139,16 @@ def test_format_governance_summary_displays_recorded_metrics() -> None:
             "pending_stages": ["P1", "P2"],
             "hard_limit_reached": False,
             "seen_message_usage": {},
+            "externalization": {
+                "externalized_tool_results": 2,
+                "original_chars": 20_000,
+                "retained_chars": 1_000,
+                "estimated_tokens_saved": 4_750,
+                "last_externalized_paths": [
+                    ".deepresearch/externalized/run/result.json"
+                ],
+                "last_error": None,
+            },
         }
     }
 
@@ -152,6 +162,8 @@ def test_format_governance_summary_displays_recorded_metrics() -> None:
     assert "模型调用次数：7" in summary
     assert "待处理阶段：P1, P2" in summary
     assert "硬限制：否" in summary
+    assert "P1 外化：2 个 Tool 结果；预计节省 4,750 Token" in summary
+    assert ".deepresearch/externalized/run/result.json" in summary
     assert "seen_message_usage" not in summary
 
 

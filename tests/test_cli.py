@@ -163,6 +163,7 @@ def test_inspect_reads_sqlite_without_model(monkeypatch, capsys, tmp_path) -> No
     assert "累计 Token：0（输入 0 / 输出 0）" in output
     assert "模型调用次数：1" in output
     assert "待处理阶段：无" in output
+    assert "P1 外化：0 个 Tool 结果；预计节省 0 Token" in output
 
 
 def test_inspect_reports_missing_thread(monkeypatch, capsys, tmp_path) -> None:  # noqa: ANN001

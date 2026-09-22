@@ -53,6 +53,7 @@ def format_governance_summary(state: Mapping[str, Any]) -> str:
 
     budget = _mapping(context.get("budget"))
     usage = _mapping(context.get("cumulative_usage"))
+    externalization = _mapping(context.get("externalization"))
     model_name = context.get("model_name")
     if not isinstance(model_name, str) or not model_name.strip():
         model_name = "未知"
@@ -72,29 +73,42 @@ def format_governance_summary(state: Mapping[str, Any]) -> str:
     if not isinstance(token_count_method, str) or not token_count_method:
         token_count_method = "unknown"
 
-    return "\n".join(
-        [
-            "上下文治理：",
-            f"模型名称：{model_name}",
-            (
-                f"上下文窗口：{_non_negative_int(budget.get('window_tokens')):,} "
-                f"Token（来源：{window_source}）"
-            ),
-            (
-                f"当前上下文：{_non_negative_int(budget.get('current_tokens')):,} "
-                f"Token（统计：{token_count_method}）"
-            ),
-            f"上下文占用：{_ratio(budget.get('utilization_ratio')):.2%}",
-            (
-                f"累计 Token：{_non_negative_int(usage.get('total_tokens')):,}"
-                f"（输入 {_non_negative_int(usage.get('input_tokens')):,} / "
-                f"输出 {_non_negative_int(usage.get('output_tokens')):,}）"
-            ),
-            f"模型调用次数：{_non_negative_int(context.get('model_call_count')):,}",
-            f"待处理阶段：{pending_stages or '无'}",
-            f"硬限制：{'是' if context.get('hard_limit_reached') is True else '否'}",
-        ]
-    )
+    lines = [
+        "上下文治理：",
+        f"模型名称：{model_name}",
+        (
+            f"上下文窗口：{_non_negative_int(budget.get('window_tokens')):,} "
+            f"Token（来源：{window_source}）"
+        ),
+        (
+            f"当前上下文：{_non_negative_int(budget.get('current_tokens')):,} "
+            f"Token（统计：{token_count_method}）"
+        ),
+        f"上下文占用：{_ratio(budget.get('utilization_ratio')):.2%}",
+        (
+            f"累计 Token：{_non_negative_int(usage.get('total_tokens')):,}"
+            f"（输入 {_non_negative_int(usage.get('input_tokens')):,} / "
+            f"输出 {_non_negative_int(usage.get('output_tokens')):,}）"
+        ),
+        f"模型调用次数：{_non_negative_int(context.get('model_call_count')):,}",
+        f"待处理阶段：{pending_stages or '无'}",
+        f"硬限制：{'是' if context.get('hard_limit_reached') is True else '否'}",
+    ]
+    if externalization:
+        lines.append(
+            "P1 外化："
+            f"{_non_negative_int(externalization.get('externalized_tool_results')):,} "
+            "个 Tool 结果；预计节省 "
+            f"{_non_negative_int(externalization.get('estimated_tokens_saved')):,} Token"
+        )
+        paths = externalization.get("last_externalized_paths")
+        if isinstance(paths, list) and paths:
+            lines.append("最近外化文件：")
+            lines.extend(f"- {path}" for path in paths)
+        last_error = externalization.get("last_error")
+        if isinstance(last_error, str) and last_error:
+            lines.append(f"最近外化错误：{last_error}")
+    return "\n".join(lines)
 
 
 def calculate_stats(state: ResearchState) -> ResearchStats:

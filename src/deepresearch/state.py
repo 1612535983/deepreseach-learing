@@ -198,6 +198,14 @@ def create_initial_governance_state() -> GovernanceState:
             "pending_stages": [],
             "hard_limit_reached": False,
             "seen_message_usage": {},
+            "externalization": {
+                "externalized_tool_results": 0,
+                "original_chars": 0,
+                "retained_chars": 0,
+                "estimated_tokens_saved": 0,
+                "last_externalized_paths": [],
+                "last_error": None,
+            },
         }
     }
 
