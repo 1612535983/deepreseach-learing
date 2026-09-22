@@ -14,6 +14,7 @@ from langchain.agents import AgentState
 from langchain_core.messages import HumanMessage
 
 from deepresearch.context.types import GovernanceState, TaggedContextState
+from deepresearch.memory.types import MemoryRuntimeState
 
 
 class SearchRecord(TypedDict):
@@ -176,6 +177,34 @@ def merge_tagged_context(
     return deepcopy(incoming)
 
 
+def merge_memory_runtime(
+    current: MemoryRuntimeState | None,
+    incoming: MemoryRuntimeState | None,
+) -> MemoryRuntimeState:
+    """Merge a partial runtime patch while replacing the current recall list."""
+
+    merged = deepcopy(dict(current or {}))
+    for key, value in dict(incoming or {}).items():
+        merged[key] = deepcopy(value)
+    return cast(MemoryRuntimeState, merged)
+
+
+def create_initial_memory_state(namespace: str = "default") -> MemoryRuntimeState:
+    """Create the checkpoint-safe runtime view for long-term memory."""
+
+    normalized_namespace = namespace.strip() or "default"
+    return {
+        "namespace": normalized_namespace,
+        "last_query_hash": None,
+        "recalled": [],
+        "recall_count": 0,
+        "injected_tokens": 0,
+        "pending_write_count": 0,
+        "last_error": None,
+        "last_processed_run": None,
+    }
+
+
 def create_initial_governance_state() -> GovernanceState:
     """Create the complete, serializable governance namespace for a new run."""
 
@@ -250,6 +279,7 @@ class ResearchState(AgentState):
     final_report: Annotated[str | None, merge_final_report]
     governance: Annotated[GovernanceState, merge_governance]
     tagged_context: Annotated[TaggedContextState | None, merge_tagged_context]
+    memory: Annotated[MemoryRuntimeState, merge_memory_runtime]
 
 
 def create_initial_state(question: str) -> ResearchState:
@@ -269,4 +299,5 @@ def create_initial_state(question: str) -> ResearchState:
         "final_report": None,
         "governance": create_initial_governance_state(),
         "tagged_context": None,
+        "memory": create_initial_memory_state(),
     }
