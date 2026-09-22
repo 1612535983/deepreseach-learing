@@ -190,7 +190,7 @@ class DefaultMemoryManager:
                     now,
                     "consolidate",
                     _memory_actor.get(),
-                    {"source_trace_ids": unique_ids},
+                    {"source_trace_ids": tuple(unique_ids)},
                 ),
             ),
         )

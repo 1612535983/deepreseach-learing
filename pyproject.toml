@@ -12,6 +12,7 @@ dependencies = [
     "langgraph-checkpoint-sqlite>=3,<4",
     "lxml>=5,<7",
     "python-dotenv>=1.0,<2",
+    "pyyaml>=6,<7",
 ]
 
 [project.optional-dependencies]
