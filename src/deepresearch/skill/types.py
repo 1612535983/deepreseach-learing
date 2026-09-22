@@ -74,6 +74,22 @@ class ParsedSkill:
 
 
 @dataclass(frozen=True)
+class SkillDiscoveryError:
+    """One bundle that discovery skipped without aborting the whole catalog."""
+
+    path: str
+    error: str
+
+
+@dataclass(frozen=True)
+class SkillDiscoveryResult:
+    """Validated bundles and isolated parse failures from one directory scan."""
+
+    skills: tuple[ParsedSkill, ...] = ()
+    errors: tuple[SkillDiscoveryError, ...] = ()
+
+
+@dataclass(frozen=True)
 class SkillSelection:
     """One selector decision with enough provenance for inspection."""
 

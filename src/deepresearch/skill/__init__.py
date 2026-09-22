@@ -3,6 +3,8 @@
 from deepresearch.skill.config import SkillConfig
 from deepresearch.skill.types import (
     ParsedSkill,
+    SkillDiscoveryError,
+    SkillDiscoveryResult,
     SkillLineage,
     SkillMetrics,
     SkillRecord,
@@ -14,6 +16,8 @@ from deepresearch.skill.types import (
 __all__ = [
     "ParsedSkill",
     "SkillConfig",
+    "SkillDiscoveryError",
+    "SkillDiscoveryResult",
     "SkillLineage",
     "SkillMetrics",
     "SkillRecord",
