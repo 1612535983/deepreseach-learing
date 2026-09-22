@@ -7,6 +7,7 @@ from deepresearch.middlewares.context_externalization import (
 from deepresearch.middlewares.context_finalization import ContextFinalizationMiddleware
 from deepresearch.middlewares.context_governance import ContextGovernanceMiddleware
 from deepresearch.middlewares.evidence import EvidenceMiddleware
+from deepresearch.middlewares.memory_recall import MemoryRecallMiddleware
 from deepresearch.middlewares.plan_context import PlanContextMiddleware
 from deepresearch.middlewares.reflection import ReflectionMiddleware
 from deepresearch.middlewares.sequential_tools import SequentialToolCallMiddleware
@@ -18,6 +19,7 @@ __all__ = [
     "ContextFinalizationMiddleware",
     "ContextGovernanceMiddleware",
     "EvidenceMiddleware",
+    "MemoryRecallMiddleware",
     "PlanContextMiddleware",
     "ReflectionMiddleware",
     "SequentialToolCallMiddleware",

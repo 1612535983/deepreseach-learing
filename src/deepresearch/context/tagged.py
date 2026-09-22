@@ -137,8 +137,14 @@ class AssembledContext:
 class ContextAssembler:
     """Turn State and raw messages into a stable, tagged model-context view."""
 
-    def __init__(self, today_provider: Callable[[], date] = _today) -> None:
+    def __init__(
+        self,
+        today_provider: Callable[[], date] = _today,
+        *,
+        memory_context_provider: Callable[[Mapping[str, Any]], str] | None = None,
+    ) -> None:
         self._today_provider = today_provider
+        self._memory_context_provider = memory_context_provider
 
     def assemble(
         self,
@@ -203,6 +209,11 @@ class ContextAssembler:
 
         if include_research_context:
             lines.extend(format_research_context(state).splitlines())
+
+        if self._memory_context_provider is not None:
+            memory_context = self._memory_context_provider(state)
+            if memory_context.strip():
+                lines.extend(memory_context.splitlines())
 
         lines.append(f"<date>{self._today_provider().isoformat()}</date>")
         return "\n".join(lines)

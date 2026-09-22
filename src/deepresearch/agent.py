@@ -26,12 +26,16 @@ from deepresearch.checkpointing import (
 from deepresearch.context.tagged import ContextAssembler
 from deepresearch.config import Settings
 from deepresearch.events import ResearchEvent, events_from_update
+from deepresearch.memory.config import MemoryConfig
+from deepresearch.memory.context import MemoryContextRenderer
+from deepresearch.memory.provider import MemoryProvider
 from deepresearch.middlewares import (
     ContextCompactionMiddleware,
     ContextExternalizationMiddleware,
     ContextFinalizationMiddleware,
     ContextGovernanceMiddleware,
     EvidenceMiddleware,
+    MemoryRecallMiddleware,
     ReflectionMiddleware,
     SequentialToolCallMiddleware,
     TaggedContextMiddleware,
@@ -88,6 +92,8 @@ def build_agent(
     model: BaseChatModel,
     tools: Sequence[BaseTool] | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
+    memory_provider: MemoryProvider | None = None,
+    memory_config: MemoryConfig | None = None,
 ) -> Any:
     """Compile the model and prompt into LangChain's ReAct agent graph."""
 
@@ -95,7 +101,16 @@ def build_agent(
     tool_names = {tool.name for tool in resolved_tools}
     system_prompt = SEARCH_SYSTEM_PROMPT if resolved_tools else BASE_SYSTEM_PROMPT
     include_research_context = "write_research_plan" in tool_names
-    context_assembler = ContextAssembler()
+    resolved_memory_config = memory_config or MemoryConfig()
+    memory_renderer = (
+        MemoryContextRenderer(
+            memory_provider.store(),
+            token_budget=resolved_memory_config.token_budget,
+        )
+        if memory_provider is not None
+        else None
+    )
+    context_assembler = ContextAssembler(memory_context_provider=memory_renderer)
 
     def project_model_messages(state: ResearchState) -> list[BaseMessage]:
         assembled = context_assembler.assemble(
@@ -118,6 +133,10 @@ def build_agent(
         # here makes Governance update the latest budget first, then lets P5
         # suppress reflection loops before final Tool routing is decided.
         middlewares.append(ReflectionMiddleware())
+    if memory_provider is not None:
+        middlewares.append(
+            MemoryRecallMiddleware(memory_provider, resolved_memory_config)
+        )
     middlewares.extend(
         [
             ContextGovernanceMiddleware(
@@ -204,6 +223,8 @@ def run_with_model(
     *,
     checkpointer: BaseCheckpointSaver | None = None,
     thread_id: str | None = None,
+    memory_provider: MemoryProvider | None = None,
+    memory_config: MemoryConfig | None = None,
 ) -> ResearchResult:
     """Run one question through a supplied model and return the final answer."""
 
@@ -214,8 +235,20 @@ def run_with_model(
     resolved_thread_id, config = resolve_checkpoint_run(checkpointer, thread_id)
     if checkpointer is not None and resolved_thread_id is not None:
         ensure_new_thread(checkpointer, resolved_thread_id)
-    graph = build_agent(model, tools=tools, checkpointer=checkpointer)
-    state = graph.invoke(create_initial_state(normalized_question), config=config)
+    graph = build_agent(
+        model,
+        tools=tools,
+        checkpointer=checkpointer,
+        memory_provider=memory_provider,
+        memory_config=memory_config,
+    )
+    state = graph.invoke(
+        create_initial_state(
+            normalized_question,
+            memory_namespace=(memory_config.namespace if memory_config else "default"),
+        ),
+        config=config,
+    )
     return _result_from_state(normalized_question, state, resolved_thread_id)
 
 

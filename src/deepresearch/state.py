@@ -282,7 +282,11 @@ class ResearchState(AgentState):
     memory: Annotated[MemoryRuntimeState, merge_memory_runtime]
 
 
-def create_initial_state(question: str) -> ResearchState:
+def create_initial_state(
+    question: str,
+    *,
+    memory_namespace: str = "default",
+) -> ResearchState:
     """Create the complete state passed into the first graph node."""
 
     return {
@@ -299,5 +303,5 @@ def create_initial_state(question: str) -> ResearchState:
         "final_report": None,
         "governance": create_initial_governance_state(),
         "tagged_context": None,
-        "memory": create_initial_memory_state(),
+        "memory": create_initial_memory_state(memory_namespace),
     }

@@ -143,3 +143,26 @@ def test_middleware_persists_snapshot_and_overrides_only_model_request() -> None
     assert response.result[0].content == "完成"
     assert "<system>系统规则</system>" in str(captured[0].system_message.content)
     assert request.system_message.content == "系统规则"
+
+
+def test_assembler_includes_optional_memory_context_provider() -> None:
+    state = create_initial_state("研究问题")
+    memory_assembler = ContextAssembler(
+        today_provider=lambda: date(2026, 9, 22),
+        memory_context_provider=lambda current: (
+            "<memory_context>历史偏好</memory_context>"
+            if current.get("memory")
+            else ""
+        ),
+    )
+
+    assembled = memory_assembler.assemble(
+        state,
+        state["messages"],
+        SystemMessage(content="系统规则"),
+        include_research_context=False,
+    )
+
+    assert "<memory_context>历史偏好</memory_context>" in str(
+        assembled.system_message.content
+    )
