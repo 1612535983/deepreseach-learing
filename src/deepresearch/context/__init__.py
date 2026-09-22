@@ -11,6 +11,11 @@ from deepresearch.context.policy import (
     ContextThresholds,
     evaluate_context_pressure,
 )
+from deepresearch.context.snapshot import (
+    ContextSnapshot,
+    ContextSnapshotter,
+    SnapshotResult,
+)
 from deepresearch.context.tokens import (
     TokenEstimate,
     TokenUsageUpdate,
@@ -42,10 +47,13 @@ __all__ = [
     "ContextExternalizationMetrics",
     "ContextGovernanceState",
     "ContextStage",
+    "ContextSnapshot",
+    "ContextSnapshotter",
     "ContextThresholds",
     "CumulativeTokenUsage",
     "GovernanceState",
     "TaggedContextState",
+    "SnapshotResult",
     "TokenCountMethod",
     "TokenEstimate",
     "TokenUsageUpdate",

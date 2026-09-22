@@ -4,7 +4,7 @@
 
 当前版本是 **阶段 9C：能够执行 P1 Tool 结果外化的研究 Agent**。上下文占用达到 40% 后，
 较旧的大型 Tool 结果会先安全写入外部文件，再由 State 中的同 ID 消息替换成预览和文件引用。
-P4 摘要压缩和 P5 强制收尾尚未实现：
+P4 摘要压缩和 P5 强制收尾尚未实现；P4 压缩前 Snapshot 的可恢复存储底座已经具备：
 
 ```text
 命令行问题
@@ -320,6 +320,7 @@ git commit -m "feat: add web search tool"
 | `src/deepresearch/context/` | 上下文治理策略层 | 定义治理类型、Token 统计、窗口识别和 P1～P5 阈值判断 |
 | `src/deepresearch/context/tagged.py` | Tagged Context 组装层 | 把选定 State 和消息转换成 request-scoped 标签化视图 |
 | `src/deepresearch/context/externalizer.py` | P1 外化执行器 | 保存完整 Tool 结果，并生成保持相同 ID 的紧凑替代消息 |
+| `src/deepresearch/context/snapshot.py` | P4 Snapshot 执行器 | 压缩前保存带 SHA-256 校验的消息和 State，并支持验证加载 |
 | `src/deepresearch/tools/web_search.py` | `agents/agent_tools/builtin/ddg_search.py` | 执行网页搜索 |
 | `src/deepresearch/tools/read_page.py` | 网页读取类 Tool | 安全下载并提取网页正文 |
 | `src/deepresearch/tools/research_plan.py` | Todo/计划类状态 Tool | 创建计划并推进步骤状态 |
