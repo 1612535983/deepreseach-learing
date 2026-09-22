@@ -9,73 +9,14 @@ from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import SystemMessage
 
+from deepresearch.context.tagged import format_research_context
 from deepresearch.state import ResearchState
 
 
 def format_plan_context(state: ResearchState) -> str:
     """Render only plan progress and aggregate counts, never raw evidence."""
 
-    plan = state.get("plan")
-    if not plan:
-        lines = [
-            "<research_plan>",
-            "No research plan exists yet. Before calling web_search or read_page, call",
-            "write_research_plan with a concise goal and 2 to 5 ordered steps.",
-            "</research_plan>",
-        ]
-        return "\n".join(_append_reflection_context(lines, state))
-
-    status_labels = {
-        "pending": "待处理",
-        "in_progress": "进行中",
-        "completed": "已完成",
-        "failed": "失败",
-    }
-    lines = [
-        "<research_plan>",
-        f'研究目标：{plan["goal"]}',
-        f'当前步骤：{state.get("current_step_id") or "无"}',
-        "步骤：",
-    ]
-    for step in plan["steps"]:
-        lines.append(
-            f'- [{status_labels[step["status"]]}] {step["step_id"]}: {step["title"]}'
-        )
-    lines.extend(
-        [
-            "进度统计：",
-            f'- 搜索次数：{len(state.get("search_records", []))}',
-            f'- 网页读取次数：{len(state.get("page_records", []))}',
-            f'- 去重来源数：{len(state.get("sources", []))}',
-            f'- Observation 数：{len(state.get("observations", []))}',
-            f'- 正式报告：{"已生成" if state.get("final_report") else "未生成"}',
-            "完成当前步骤后调用 update_plan_step，再继续下一步。",
-            "</research_plan>",
-        ]
-    )
-    return "\n".join(_append_reflection_context(lines, state))
-
-
-def _append_reflection_context(
-    lines: list[str],
-    state: ResearchState,
-) -> list[str]:
-    """Append only actionable gap text produced by ReflectionMiddleware."""
-
-    gaps = state.get("research_gaps", [])
-    if not gaps:
-        return lines
-
-    lines.extend(
-        [
-            "<research_gaps>",
-            "上一次回答前的程序检查发现以下缺口，请继续使用工具补充：",
-            *(f"- {gap}" for gap in gaps),
-            f'当前反思次数：{state.get("reflection_attempts", 0)}',
-            "</research_gaps>",
-        ]
-    )
-    return lines
+    return format_research_context(state)
 
 
 def _system_text(message: SystemMessage | None) -> str:

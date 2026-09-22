@@ -28,9 +28,9 @@ from deepresearch.events import ResearchEvent, events_from_update
 from deepresearch.middlewares import (
     ContextGovernanceMiddleware,
     EvidenceMiddleware,
-    PlanContextMiddleware,
     ReflectionMiddleware,
     SequentialToolCallMiddleware,
+    TaggedContextMiddleware,
 )
 from deepresearch.state import ResearchState, create_initial_state
 from deepresearch.tools import (
@@ -89,6 +89,7 @@ def build_agent(
 
     resolved_tools = list(tools or [])
     tool_names = {tool.name for tool in resolved_tools}
+    system_prompt = SEARCH_SYSTEM_PROMPT if resolved_tools else BASE_SYSTEM_PROMPT
     middlewares = [ContextGovernanceMiddleware(model)]
     state_mutating_tools = {
         "write_research_plan",
@@ -97,8 +98,12 @@ def build_agent(
     }
     if state_mutating_tools.intersection(tool_names):
         middlewares.append(SequentialToolCallMiddleware())
-    if "write_research_plan" in tool_names:
-        middlewares.append(PlanContextMiddleware())
+    middlewares.append(
+        TaggedContextMiddleware(
+            system_prompt,
+            include_research_context="write_research_plan" in tool_names,
+        )
+    )
     if {"web_search", "read_page"}.intersection(tool_names):
         middlewares.append(EvidenceMiddleware())
     research_tool_names = {
@@ -113,7 +118,7 @@ def build_agent(
         model=model,
         tools=resolved_tools,
         middleware=middlewares,
-        system_prompt=SEARCH_SYSTEM_PROMPT if resolved_tools else BASE_SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         state_schema=ResearchState,
         checkpointer=checkpointer,
     )

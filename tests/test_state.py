@@ -4,6 +4,7 @@ from deepresearch.state import (
     create_initial_state,
     merge_final_report,
     merge_sources,
+    merge_tagged_context,
 )
 
 
@@ -21,6 +22,7 @@ def test_create_initial_state_contains_research_fields() -> None:
     assert state["reflection_attempts"] == 0
     assert state["research_gaps"] == []
     assert state["final_report"] is None
+    assert state["tagged_context"] is None
 
 
 def test_search_records_and_observations_append() -> None:
@@ -65,3 +67,15 @@ def test_sources_are_deduplicated_by_url() -> None:
 def test_final_report_uses_latest_non_null_value() -> None:
     assert merge_final_report("old report", None) == "old report"
     assert merge_final_report("old report", "new report") == "new report"
+
+
+def test_tagged_context_uses_latest_detached_snapshot() -> None:
+    current = {"rendered": "old", "message_count": 1, "created_at": "old-time"}
+    incoming = {"rendered": "new", "message_count": 2, "created_at": "new-time"}
+
+    merged = merge_tagged_context(current, incoming)
+    assert merged == incoming
+
+    assert merged is not None
+    merged["rendered"] = "changed"
+    assert incoming["rendered"] == "new"

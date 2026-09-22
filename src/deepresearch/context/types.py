@@ -50,3 +50,11 @@ class GovernanceState(TypedDict, total=False):
     """Top-level namespace reserved for governance subsystems."""
 
     context: ContextGovernanceState
+
+
+class TaggedContextState(TypedDict, total=False):
+    """Latest audit snapshot of the request-scoped context shown to the model."""
+
+    rendered: str
+    message_count: int
+    created_at: str

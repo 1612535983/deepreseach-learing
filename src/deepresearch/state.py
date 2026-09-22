@@ -13,7 +13,7 @@ from typing import Annotated, Any, Literal, NotRequired, TypedDict, cast
 from langchain.agents import AgentState
 from langchain_core.messages import HumanMessage
 
-from deepresearch.context.types import GovernanceState
+from deepresearch.context.types import GovernanceState, TaggedContextState
 
 
 class SearchRecord(TypedDict):
@@ -165,6 +165,17 @@ def merge_governance(
     return cast(GovernanceState, merged)
 
 
+def merge_tagged_context(
+    current: TaggedContextState | None,
+    incoming: TaggedContextState | None,
+) -> TaggedContextState | None:
+    """Keep the latest detached model-context audit snapshot."""
+
+    if incoming is None:
+        return deepcopy(current)
+    return deepcopy(incoming)
+
+
 def create_initial_governance_state() -> GovernanceState:
     """Create the complete, serializable governance namespace for a new run."""
 
@@ -205,6 +216,7 @@ class ResearchState(AgentState):
     research_gaps: NotRequired[list[str]]
     final_report: Annotated[str | None, merge_final_report]
     governance: Annotated[GovernanceState, merge_governance]
+    tagged_context: Annotated[TaggedContextState | None, merge_tagged_context]
 
 
 def create_initial_state(question: str) -> ResearchState:
@@ -223,4 +235,5 @@ def create_initial_state(question: str) -> ResearchState:
         "research_gaps": [],
         "final_report": None,
         "governance": create_initial_governance_state(),
+        "tagged_context": None,
     }

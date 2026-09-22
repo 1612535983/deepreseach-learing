@@ -18,6 +18,7 @@ from deepresearch.context.types import (
     ContextStage,
     CumulativeTokenUsage,
     GovernanceState,
+    TaggedContextState,
     TokenCountMethod,
 )
 from deepresearch.context.windows import (
@@ -35,6 +36,7 @@ __all__ = [
     "ContextThresholds",
     "CumulativeTokenUsage",
     "GovernanceState",
+    "TaggedContextState",
     "TokenCountMethod",
     "TokenEstimate",
     "TokenUsageUpdate",

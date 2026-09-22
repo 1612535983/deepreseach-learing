@@ -2,8 +2,8 @@
 
 这个项目不是直接复制 Poirot，而是沿着 Poirot 的核心执行链逐层重建：先让最小 Agent 跑通，再按 Git 阶段加入 Tool、Middleware、State、Skill 和其他基础设施。
 
-当前版本是 **阶段 9A：具备上下文治理观测能力的研究 Agent**。这个阶段只测量、判断和展示，
-暂时不会删除、外化或压缩消息：
+当前版本是 **阶段 9B：具备 Tagged Context 投影能力的研究 Agent**。原始消息继续保存在
+State 中，模型调用前会额外组装一份带语义标签的请求视图；暂时不会删除、外化或压缩消息：
 
 ```text
 命令行问题
@@ -25,9 +25,13 @@ create_agent() 编译 Agent Graph
     │   ├── 当前 Token / 上下文窗口 / 占用比例
     │   ├── 累计 Token / 模型调用次数
     │   └── pending_stages / hard_limit_reached
+    ├── tagged_context（最后一次模型可见上下文的审计快照）
     └── SQLite Checkpointer（按 thread_id 持久化快照）
     ↓
-PlanContextMiddleware 选择性注入计划进度
+TaggedContextMiddleware 组装 request-scoped 模型视图
+    ├── <system> / <goal> / <date>
+    ├── <research_plan> / <research_progress> / <research_gaps>
+    └── <turn> / <answer> / <toolcall> / <toolresult>
     ↓
 SequentialToolCallMiddleware 禁止并行 Tool Call
     ↓
@@ -211,7 +215,9 @@ Checkpoint State 中的模型名称、上下文窗口、当前 Token、占用比
 再选择重要来源读取正文。`write_research_plan` 和 `update_plan_step` 负责创建并推进计划。
 研究完成后，模型必须调用 `write_final_report`，并提交 Markdown 内容和实际引用的 URL。
 Tool 会确认研究已经完成、至少引用两个收集过的来源，而且声明的 URL 确实出现在报告正文中。
-`PlanContextMiddleware` 每轮只向模型展示计划进度和聚合计数，不会把完整 State 全量注入。
+`TaggedContextMiddleware` 每轮从 State 投影系统规则、研究目标、计划进度和聚合计数，并为
+对话、回答、Tool Call 和 Tool 结果建立语义标签。投影只修改当次 `ModelRequest`，不会覆盖
+State 中的原始消息；最后一次投影另存到 `tagged_context`，用于 Checkpoint 和审计。
 `SequentialToolCallMiddleware` 会向模型绑定层传入 `parallel_tool_calls=False`，确保会更新
 Plan 和 `current_step_id` 的 Tool 逐轮执行，避免多个 `Command` 同时写入同一个 State 字段。
 `ReflectionMiddleware` 在模型不再调用 Tool、准备结束时读取 State，检查计划是否完成、
@@ -261,8 +267,8 @@ Plan 和 `current_step_id` 的 Tool 逐轮执行，避免多个 `Command` 同时
 9. **阶段 7（已完成）— 流式输出**：把 `stream()/astream()` 更新转换成统一事件，并在 CLI 实时显示。
 10. **阶段 8A（已完成）— 内存 Checkpointer**：把 Checkpointer 装入 Graph，通过 config 的 `thread_id` 自动保存和隔离 State。
 11. **阶段 8B（已完成）— SQLite Checkpointer**：让 Checkpoint 跨进程持久化，并增加 `resume` 和 `inspect` 命令。
-12. **阶段 9A（当前）— Context Governance 观测层**：增加治理 State、Token 统计、模型窗口识别、阈值判断、Middleware 记录，以及 Trace/inspect 展示；暂不修改消息。
-13. **阶段 9B — Tagged Context**：标记消息和上下文片段的来源、类别与保留优先级。
+12. **阶段 9A（已完成）— Context Governance 观测层**：增加治理 State、Token 统计、模型窗口识别、阈值判断、Middleware 记录，以及 Trace/inspect 展示；暂不修改消息。
+13. **阶段 9B（当前）— Tagged Context**：保留原始 State，同时组装并审计带语义标签的模型请求视图。
 14. **阶段 9C — P1 Tool 结果外化**：把大体积 Tool 结果保存到消息之外，只保留引用和摘要。
 15. **阶段 9D — P4 Snapshot 与摘要压缩**：保存压缩前快照，并把较旧上下文替换成可恢复摘要。
 16. **阶段 9E — P5 强制收尾**：高占用时停止继续调用 Tool，引导模型生成最终产物。
@@ -299,15 +305,17 @@ git commit -m "feat: add web search tool"
 | `src/deepresearch/events.py` | Agent 事件协议 | 把 LangGraph 原始更新转换成稳定的 `ResearchEvent` |
 | `src/deepresearch/state.py` | `agents/state/types.py` + `reducers.py` | 定义共享研究状态和合并规则 |
 | `src/deepresearch/context/` | 上下文治理策略层 | 定义治理类型、Token 统计、窗口识别和 P1～P5 阈值判断 |
+| `src/deepresearch/context/tagged.py` | Tagged Context 组装层 | 把选定 State 和消息转换成 request-scoped 标签化视图 |
 | `src/deepresearch/tools/web_search.py` | `agents/agent_tools/builtin/ddg_search.py` | 执行网页搜索 |
 | `src/deepresearch/tools/read_page.py` | 网页读取类 Tool | 安全下载并提取网页正文 |
 | `src/deepresearch/tools/research_plan.py` | Todo/计划类状态 Tool | 创建计划并推进步骤状态 |
 | `src/deepresearch/tools/final_report.py` | 最终产物 Tool | 校验报告与来源，并把 Markdown 保存到 State |
 | `src/deepresearch/middlewares/evidence.py` | `agents/middlewares/evidence_middleware.py` | 把搜索和正文结果沉淀为结构化证据 |
-| `src/deepresearch/middlewares/plan_context.py` | 计划上下文 Middleware | 选择性向模型暴露计划进度 |
+| `src/deepresearch/middlewares/plan_context.py` | 计划上下文兼容层 | 提供计划投影格式，实际 Agent 由 Tagged Context 统一组装 |
 | `src/deepresearch/middlewares/sequential_tools.py` | Tool 调度 Middleware | 禁止并行 Tool Call，避免 State 并发写冲突 |
 | `src/deepresearch/middlewares/reflection.py` | 反思/质量控制 Middleware | 在结束前检查缺口，并有限次回到模型 |
 | `src/deepresearch/middlewares/context_governance.py` | 上下文治理 Middleware | 每次模型调用后把测量和阈值判断结果写入 State |
+| `src/deepresearch/middlewares/tagged_context.py` | Tagged Context Middleware | 请求前保存审计快照，并只对本次模型请求应用标签化投影 |
 | `src/deepresearch/reporting.py` | 输出层 | 显示 Trace，并把 `final_report` 写成 `.md` 文件 |
 | `build_agent()` | `agents/leader/factory.py` | 编译 Agent Graph |
 | `run_with_model()` | `agents/leader/agent.py` | 执行 Graph 并整理输出 |

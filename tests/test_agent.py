@@ -23,3 +23,6 @@ def test_agent_returns_model_answer() -> None:
     assert result.question == "什么是 ReAct？"
     assert result.answer == "这是模型答案"
     assert result.state["sources"] == []
+    assert result.state["messages"][-1].content == "这是模型答案"
+    assert result.state["tagged_context"] is not None
+    assert "<goal>什么是 ReAct？</goal>" in result.state["tagged_context"]["rendered"]
