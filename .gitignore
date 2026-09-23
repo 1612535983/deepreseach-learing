@@ -11,4 +11,5 @@ dist/
 build/
 *.egg-info/
 .deepresearch/
-reports/
+reports/*
+!reports/jev-shadow-test-005.md

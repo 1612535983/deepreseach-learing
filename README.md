@@ -13,7 +13,7 @@
 ![LangGraph](https://img.shields.io/badge/LangGraph-Stateful_Agent-1C3C3C)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[快速开始](#快速开始) · [工作流程](#工作流程) · [核心架构](#核心架构) · [学习路线](#面向爱好者的学习路线) · [进阶能力](#进阶能力) · [示例报告](examples/sample-report.md)
+[快速开始](#快速开始) · [工作流程](#工作流程) · [核心架构](#核心架构) · [学习路线](#面向爱好者的学习路线) · [进阶能力](#进阶能力) · [示例报告](reports/jev-shadow-test-005.md)
 
 </div>
 
@@ -119,7 +119,7 @@ uv run deepresearch run "研究 LangChain Agent" \
   --output reports/langchain-agent.md
 ```
 
-可以先查看[示例报告：LangChain Agent 如何工作？](examples/sample-report.md)。示例经过压缩，用于展示输出结构；真实内容会随研究问题、模型和搜索结果变化。
+可以先查看[示例报告：LangGraph Agent 核心工作机制](reports/jev-shadow-test-005.md)。该报告展示了完整研究正文、参考来源以及 Jev Shadow 模式生成的质量评估附录；真实内容会随研究问题、模型和搜索结果变化。
 
 ## 工作流程
 
@@ -210,6 +210,7 @@ flowchart TB
 │   └── evaluation/          # 报告/Skill 概率评估与 Provider 适配
 ├── tests/                   # 自动化测试
 ├── examples/                # 输出样例
+├── reports/                 # 运行报告与 Jev Shadow 示例
 ├── docs/assets/             # README 素材
 ├── .github/workflows/       # GitHub Actions
 └── pyproject.toml           # 依赖、脚本入口与打包配置
