@@ -20,6 +20,7 @@ from deepresearch.middlewares.context_finalization import (
 )
 from deepresearch.middlewares.reflection import ReflectionMiddleware
 from deepresearch.state import create_initial_state
+from deepresearch.tools import update_plan_step_tool, write_final_report_tool
 
 
 def p5_state(
@@ -202,6 +203,71 @@ def test_productive_search_resets_consecutive_failure_budget() -> None:
                     "name": "web_search",
                     "args": {"query": "different query"},
                     "id": "normal-call",
+                    "type": "tool_call",
+                }
+            ],
+        )
+    )
+
+    assert ContextFinalizationMiddleware().after_model(  # type: ignore[arg-type]
+        state, None
+    ) is None
+
+
+def test_research_budget_never_blocks_terminal_tools() -> None:
+    state = create_initial_state("达到读取上限后写报告")
+    state["page_records"] = [
+        {
+            "requested_url": f"https://example.com/{index}",
+            "final_url": f"https://example.com/{index}",
+            "success": True,
+            "content_chars": 100,
+            "truncated": False,
+            "error": None,
+        }
+        for index in range(12)
+    ]
+    state["messages"].append(
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "write_final_report",
+                    "args": {"report": "基于已有证据生成报告"},
+                    "id": "valid-terminal-call",
+                    "type": "tool_call",
+                }
+            ],
+        )
+    )
+
+    update = ContextFinalizationMiddleware().after_model(  # type: ignore[arg-type]
+        state, None
+    )
+
+    assert update is None
+    assert state["governance"]["context"]["finalization"]["active"] is False
+
+
+def test_search_budget_does_not_block_reading_an_existing_source() -> None:
+    state = create_initial_state("搜索达到上限后读取来源")
+    state["search_records"] = [
+        {
+            "query": f"query-{index}",
+            "success": True,
+            "result_count": 1,
+            "error": None,
+        }
+        for index in range(12)
+    ]
+    state["messages"].append(
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "read_page",
+                    "args": {"url": "https://example.com/source"},
+                    "id": "read-existing-source",
                     "type": "tool_call",
                 }
             ],
@@ -533,3 +599,95 @@ def test_agent_stops_failed_search_loop_before_tool_executes_again() -> None:
     assert metrics["active"] is True
     assert metrics["trigger_reason"] == "consecutive_unproductive_searches"
     assert metrics["blocked_tool_call_count"] == 1
+
+
+def test_page_budget_allows_plan_correction_and_second_report_attempt() -> None:
+    source_a = "https://a.example/article"
+    source_b = "https://b.example/article"
+    report = f"# 报告\n\n结论。\n\n- {source_a}\n- {source_b}"
+    model = LoopToolModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "write_final_report",
+                        "args": {
+                            "title": "研究报告",
+                            "report": report,
+                            "used_source_urls": [source_a, source_b],
+                        },
+                        "id": "rejected-report",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "update_plan_step",
+                        "args": {"step_id": "step-2", "status": "completed"},
+                        "id": "complete-plan",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "write_final_report",
+                        "args": {
+                            "title": "研究报告",
+                            "report": report,
+                            "used_source_urls": [source_a, source_b],
+                        },
+                        "id": "accepted-report",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(content="报告完成。"),
+        ]
+    )
+    state = create_initial_state("达到读取上限后完成报告")
+    state["plan"] = {
+        "goal": "完成研究",
+        "steps": [
+            {"step_id": "step-1", "title": "搜索", "status": "completed"},
+            {"step_id": "step-2", "title": "报告", "status": "in_progress"},
+        ],
+    }
+    state["current_step_id"] = "step-2"
+    state["sources"] = [
+        {"title": "A", "url": source_a, "snippet": "A", "query": "q"},
+        {"title": "B", "url": source_b, "snippet": "B", "query": "q"},
+    ]
+    state["observations"] = [
+        {"content": "A", "source_url": source_a, "query": "q"},
+        {"content": "B", "source_url": source_b, "query": "q"},
+    ]
+    state["page_records"] = [
+        {
+            "requested_url": source_a,
+            "final_url": source_a,
+            "success": True,
+            "content_chars": 100,
+            "truncated": False,
+            "error": None,
+        }
+        for _ in range(12)
+    ]
+    graph = build_agent(
+        model,
+        tools=[update_plan_step_tool, write_final_report_tool],
+    )
+
+    final_state = graph.invoke(state)
+
+    assert final_state["plan"]["steps"][1]["status"] == "completed"
+    assert final_state["final_report"] == report
+    assert final_state["governance"]["context"]["finalization"][
+        "active"
+    ] is False

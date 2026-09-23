@@ -423,21 +423,30 @@ class ContextFinalizationMiddleware(AgentMiddleware):
     ) -> str | None:
         """Detect unproductive research loops before their next Tool executes."""
 
-        search_records = list(state.get("search_records", []))
-        if len(search_records) >= self._max_search_attempts:
-            return "search_attempt_limit"
-        consecutive_searches = 0
-        for record in reversed(search_records):
-            if (
-                record.get("success") is True
-                and int(record.get("result_count") or 0) > 0
-            ):
-                break
-            consecutive_searches += 1
-        if consecutive_searches >= self._max_consecutive_unproductive_searches:
-            return "consecutive_unproductive_searches"
+        if last_ai is None or not last_ai.tool_calls:
+            return None
+        requested_tools = {
+            str(tool_call.get("name") or "") for tool_call in last_ai.tool_calls
+        }
 
-        if last_ai is not None:
+        search_records = list(state.get("search_records", []))
+        if "web_search" in requested_tools:
+            if len(search_records) >= self._max_search_attempts:
+                return "search_attempt_limit"
+            consecutive_searches = 0
+            for record in reversed(search_records):
+                if (
+                    record.get("success") is True
+                    and int(record.get("result_count") or 0) > 0
+                ):
+                    break
+                consecutive_searches += 1
+            if (
+                consecutive_searches
+                >= self._max_consecutive_unproductive_searches
+            ):
+                return "consecutive_unproductive_searches"
+
             for tool_call in last_ai.tool_calls:
                 if tool_call.get("name") != "web_search":
                     continue
@@ -454,15 +463,16 @@ class ContextFinalizationMiddleware(AgentMiddleware):
                     return "repeated_search_query"
 
         page_records = list(state.get("page_records", []))
-        if len(page_records) >= self._max_page_reads:
-            return "page_read_limit"
-        consecutive_page_failures = 0
-        for record in reversed(page_records):
-            if record.get("success") is True:
-                break
-            consecutive_page_failures += 1
-        if consecutive_page_failures >= self._max_consecutive_page_failures:
-            return "consecutive_page_failures"
+        if "read_page" in requested_tools:
+            if len(page_records) >= self._max_page_reads:
+                return "page_read_limit"
+            consecutive_page_failures = 0
+            for record in reversed(page_records):
+                if record.get("success") is True:
+                    break
+                consecutive_page_failures += 1
+            if consecutive_page_failures >= self._max_consecutive_page_failures:
+                return "consecutive_page_failures"
         return None
 
     @staticmethod
