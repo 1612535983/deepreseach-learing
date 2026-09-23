@@ -14,7 +14,7 @@
 ![Tests](https://img.shields.io/badge/tests-302_passed-2EA44F)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[快速开始](#快速开始) · [工作流程](#工作流程) · [核心设计](#核心设计) · [Skill](#skill-系统) · [学习路线](#分阶段实现路线) · [示例报告](examples/sample-report.md)
+[快速开始](#快速开始) · [工作流程](#工作流程) · [核心设计](#核心设计) · [Skill](#skill-系统) · [Jev 评估](#jev-概率评估与报告输出) · [学习路线](#分阶段实现路线) · [示例报告](examples/sample-report.md)
 
 </div>
 
@@ -71,8 +71,10 @@ flowchart LR
     F -->|仍有缺口| C
     F -->|条件满足| G[生成并校验报告]
     G --> M{Jev 概率评估}
-    M -->|通过| H[ResearchResult / Markdown]
-    M -->|继续研究 / 修改报告| C
+    M -->|Shadow: 只记录| H[ResearchResult / Markdown + Jev 评估]
+    M -->|Gate: 通过 / 人工复核| H
+    M -->|Gate: 继续研究| C
+    M -->|Gate: 修改报告| G
 
     I[(SQLite Checkpoint)] -.保存与恢复.-> B
     J[(长期记忆)] -.召回与巩固.-> E
@@ -80,7 +82,7 @@ flowchart LR
     K[Context Governance] -.外化 / 压缩 / 收尾.-> F
 ```
 
-当前版本已完成 **阶段 12：概率与评估层**。上下文占用达到 40% 后执行 P1 外化；达到 80%
+当前版本已完成 **阶段 12C：Jev 评估报告落盘**。上下文占用达到 40% 后执行 P1 外化；达到 80%
 后先保存可验证 Snapshot，再用结构化摘要替换较旧历史；达到 90% 后进入 P5 收尾模式，
 禁止继续扩张研究。P2、P3 当前用于治理观测，尚未单独改写上下文。
 
@@ -416,13 +418,67 @@ uv run deepresearch run "核验这项声明并给出来源" --skill source-verif
 BM25 排序，不额外消耗一次模型调用。`skills history/enable/disable/rollback` 用于查看版本、
 切换启用状态和回滚激活版本。
 
-建议先用 Jev 的 Shadow 模式收集数据，不改变 Agent 路由：
+### Jev 概率评估与报告输出
+
+Jev 位于正式报告生成之后。它的输入是经过限长的“研究问题 + 最终报告 + 引用来源 +
+相关证据 + 计划摘要”，输出是五个概率、一个来源质量分和一个建议动作。评估结果先进入
+`ResearchState.evaluation.report`，由 SQLite Checkpoint 持久化；使用 `--output` 时，
+`save_markdown_report()` 再把它作为独立章节追加到 Markdown 报告末尾。
+
+```text
+write_final_report
+    ↓
+ReportEvaluationMiddleware
+    ↓
+evaluation.report
+    ├── Checkpoint / inspect
+    ├── Stream / Trace
+    └── Markdown 末尾的“Jev 报告质量评估”
+```
+
+建议先使用 Shadow 模式收集数据，不改变 Agent 路由：
 
 ```dotenv
 DEEPRESEARCH_EVALUATION_USE=jev
 DEEPRESEARCH_EVALUATION_MODE=shadow
 DEEPRESEARCH_JEV_API_KEY=your-typesafe-api-key
 ```
+
+用一个新的 `thread_id` 运行，并把报告写入 Markdown：
+
+```bash
+uv run deepresearch run "请研究 LangGraph Agent 的核心工作机制，并引用至少两个可靠来源" \
+  --stream \
+  --show-trace \
+  --thread-id jev-shadow-test-001 \
+  --output reports/jev-shadow-test-001.md
+```
+
+生成的 `.md` 不只有研究正文，末尾还会出现类似下面的程序化评估附录：
+
+```markdown
+## Jev 报告质量评估
+
+- 状态：completed
+- 模式：Shadow（仅观察，不自动修改报告）
+- Provider / 模型：jev / jev-1.13.0
+- 综合质量分：**72.9%**
+- 建议动作：修订报告
+- 实际动作：仅记录结果
+
+| 指标 | 结果 | 置信度 |
+| --- | ---: | ---: |
+| 回答相关概率 | 95.0% | — |
+| 证据支持概率 | 57.0% | — |
+| 引用充分概率 | 64.0% | — |
+| 证据足够概率 | 73.0% | — |
+| 继续研究概率 | 26.0% | — |
+| 来源质量评分 | 2.82 / 3 | 82.0% |
+```
+
+报告正文由 LLM 生成，Jev 附录由 Python 根据结构化 State 确定性渲染，因此不会要求模型
+自己描述评估结果。Jev 未启用时不追加空章节；调用失败时会追加 fail-open 状态，但不会阻断
+研究报告落盘。`reports/` 是本地运行产物并已被 Git 忽略，代码仓库不会提交真实任务报告。
 
 每个“报告 + 证据”版本只发起一次批量评估，得到回答相关、证据支持、引用充分、证据足够和继续研究
 五个概率，以及来源质量分。发送给 Provider 的不是完整 `ResearchState`：Payload 只包含研究问题、
@@ -459,7 +515,8 @@ Plan 和 `current_step_id` 的 Tool 逐轮执行，避免多个 `Command` 同时
 `ReportEvaluationMiddleware` 只在上述确定性检查通过且报告已经保存后运行。它通过 Provider-neutral
 接口调用 Jev，一次提交五个 `Noul` 问题和一个 `Score` 问题；Shadow 结果只进入 State，Gate
 结果才会以 `<report_evaluation>` 投影给下一轮模型。评估结果由 Checkpointer 自动持久化，
-`--stream`、`--show-trace` 和 `inspect` 都可查看质量分、动作、延迟、Token 与成本。
+`--stream`、`--show-trace` 和 `inspect` 都可查看质量分、动作、延迟、Token 与成本；任务结束后，
+`--output` 还会把同一份结构化结果追加到 Markdown 报告中。
 `ContextGovernanceMiddleware` 在每次模型调用后统计当前消息 Token、识别模型上下文窗口、
 累计供应商返回的 Token usage，并按 P1～P5 阈值写入 `governance.context`。它也会在模型
 调用前重新测量最终标签化请求，使刚进入 State 的 Tool 结果能在发送给下一轮模型前触发治理。
@@ -566,8 +623,9 @@ deepresearch-agent/
 18. **阶段 11（已完成）— Skill**：解析 Poirot 风格的 `SKILL.md`，用不可变版本仓库、确定性选择、预算注入、Checkpoint 引用和效果指标管理过程知识。
 19. **阶段 12（已完成）— 概率与评估层**：使用 Provider-neutral 接口接入 Jev，批量评估回答相关性、证据支持、引用充分性、证据充分性、继续研究概率和来源质量；支持 Shadow、有限 Gate、Checkpoint 与完整遥测。
 20. **阶段 12B（已完成）— 研究循环预算**：限制总搜索/读取次数、连续失败和重复查询；在 Tool 执行前触发有界收尾，避免外部服务异常导致无限循环。
-21. **阶段 13 — 评估数据集与概率校准**：积累人工标签，计算 Brier Score、ECE、阈值回归和质量/成本 Pareto，避免直接把模型概率当成事实正确率。
-22. **后续阶段**：MCP、Sandbox、API/前端，最后再考虑多 Agent。
+21. **阶段 12C（已完成）— 评估报告落盘**：把结构化 Jev 结果确定性渲染到 Markdown 末尾，使质量分、分项概率、动作和调用成本可以随报告一起交付。
+22. **阶段 13 — 评估数据集与概率校准**：积累人工标签，计算 Brier Score、ECE、阈值回归和质量/成本 Pareto，避免直接把模型概率当成事实正确率。
+23. **后续阶段**：MCP、Sandbox、API/前端，最后再考虑多 Agent。
 
 ## Git 管理建议
 
