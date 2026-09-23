@@ -11,7 +11,7 @@
 [![Tests](https://github.com/1612535983/deepreseach-learing/actions/workflows/tests.yml/badge.svg)](https://github.com/1612535983/deepreseach-learing/actions/workflows/tests.yml)
 ![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)
 ![LangGraph](https://img.shields.io/badge/LangGraph-Stateful_Agent-1C3C3C)
-![Tests](https://img.shields.io/badge/tests-291_passed-2EA44F)
+![Tests](https://img.shields.io/badge/tests-296_passed-2EA44F)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 [快速开始](#快速开始) · [工作流程](#工作流程) · [核心设计](#核心设计) · [Skill](#skill-系统) · [学习路线](#分阶段实现路线) · [示例报告](examples/sample-report.md)
@@ -55,7 +55,7 @@ DeepResearch Agent 是一个面向学习与工程实践的 LangGraph 研究 Agen
 |---|---|---|
 | 计划、搜索、正文读取、证据聚合、引用校验、报告生成 | SQLite Checkpoint、`thread_id` 隔离、流式事件、任务恢复 | Token 观测、P1 外化、P4 摘要压缩、P5 强制收尾 |
 | **🧠 长期记忆** | **🧩 Skill 系统** | **✅ 工程质量** |
-| Markdown truth store、BM25 召回、衰减、软遗忘、后台巩固 | `SKILL.md`、不可变版本、BM25 选择、预算注入、效果指标 | 291 个测试、离线 Demo、GitHub Actions、模块化 Middleware |
+| Markdown truth store、BM25 召回、衰减、软遗忘、后台巩固 | `SKILL.md`、不可变版本、BM25 选择、预算注入、效果指标 | 296 个测试、离线 Demo、GitHub Actions、模块化 Middleware |
 | **🎯 概率评估** | **🔁 语义 Reflection** | **📊 评估遥测** |
 | 相关性、证据支持、引用充分、证据足够概率与来源质量分 | Shadow 安全观测、Gate 有限回跳、P5 优先收尾 | Checkpoint、事件、Trace 中的延迟、Token、成本与质量分 |
 
@@ -160,6 +160,11 @@ ContextFinalizationMiddleware 执行 P5
     ├── 注入隐藏收尾提醒 → jump_to="model"
     ├── 只允许 update_plan_step / write_final_report
     └── 再次违反 → 有界强制停止，避免无限循环
+    ↓ 搜索/阅读持续失败或重复调用
+Research Tool 运行预算触发同一套有界收尾
+    ├── 搜索最多 12 次、阅读最多 12 次
+    ├── 连续 4 次无效搜索或连续 3 次网页读取失败后收尾
+    └── 同一搜索词执行 2 次后拦截第 3 次
     ↓
 模型调用 write_final_report
     ↓
@@ -472,6 +477,9 @@ LangChain 消息。随后由内部摘要调用压缩较旧前缀，最近约 6 �
 流程，`update_plan_step` 和 `write_final_report` 仍可有限执行。收尾模式一旦触发便在当前任务中
 保持有效，Reflection 不再增加研究轮次；扩张型 Tool 再次违反或收尾 Tool 超过上限时直接停止，
 防止预算保护本身形成死循环。
+同一个 Middleware 也负责研究 Tool 运行预算：搜索或读取连续失败、同一搜索词反复调用、或者
+达到总次数上限时，在下一次 Tool 真正执行前剥离调用，并通过流式 `finalization` 事件说明原因。
+模型获得一次使用已有证据更新计划和写报告的机会；如果仍请求扩张型 Tool，则有界强制结束。
 `demo` 模式仍使用无工具的 Fake Model，保证在没有网络和 API Key 时也能验证基础链路。
 
 `.env` 已被 `.gitignore` 排除，真实 API Key 不会进入 Git。
@@ -490,7 +498,7 @@ deepresearch-agent/
 │   ├── evaluation/          # Jev Provider、受控 Payload、概率合成与契约
 │   ├── middlewares/         # 证据、反思、评估、治理、记忆等横切逻辑
 │   └── tools/               # 搜索、网页读取、计划和最终报告
-├── tests/                   # 291 个自动化测试
+├── tests/                   # 296 个自动化测试
 ├── examples/                # 可公开查看的输出样例
 ├── .github/workflows/       # GitHub Actions 自动测试
 └── pyproject.toml           # 依赖、脚本入口与打包配置
@@ -552,8 +560,9 @@ deepresearch-agent/
 17. **阶段 10（已完成）— 记忆系统**：使用独立 Markdown truth store、BM25 召回、惰性衰减、软遗忘和后台巩固，实现跨任务长期记忆。
 18. **阶段 11（已完成）— Skill**：解析 Poirot 风格的 `SKILL.md`，用不可变版本仓库、确定性选择、预算注入、Checkpoint 引用和效果指标管理过程知识。
 19. **阶段 12（已完成）— 概率与评估层**：使用 Provider-neutral 接口接入 Jev，批量评估回答相关性、证据支持、引用充分性、证据充分性、继续研究概率和来源质量；支持 Shadow、有限 Gate、Checkpoint 与完整遥测。
-20. **阶段 13 — 评估数据集与概率校准**：积累人工标签，计算 Brier Score、ECE、阈值回归和质量/成本 Pareto，避免直接把模型概率当成事实正确率。
-21. **后续阶段**：错误恢复与预算、MCP、Sandbox、API/前端，最后再考虑多 Agent。
+20. **阶段 12B（已完成）— 研究循环预算**：限制总搜索/读取次数、连续失败和重复查询；在 Tool 执行前触发有界收尾，避免外部服务异常导致无限循环。
+21. **阶段 13 — 评估数据集与概率校准**：积累人工标签，计算 Brier Score、ECE、阈值回归和质量/成本 Pareto，避免直接把模型概率当成事实正确率。
+22. **后续阶段**：MCP、Sandbox、API/前端，最后再考虑多 Agent。
 
 ## Git 管理建议
 

@@ -56,6 +56,7 @@ def test_initial_state_contains_complete_serializable_governance() -> None:
         "last_blocked_tool_names": [],
         "last_utilization_ratio": 0.0,
         "last_reason": None,
+        "trigger_reason": None,
         "last_reminder_id": None,
     }
     json.dumps(state["governance"])

@@ -254,3 +254,28 @@ def test_report_evaluation_error_event_does_not_fail_stream() -> None:
     assert len(events) == 1
     assert events[0].event_type == "report_evaluated"
     assert events[0].data["error"] == "TimeoutError: evaluation failed"
+
+
+def test_research_budget_finalization_emits_safe_event() -> None:
+    events = events_from_update(
+        {
+            "ContextFinalizationMiddleware.after_model": {
+                "governance": {
+                    "context": {
+                        "finalization": {
+                            "active": True,
+                            "last_reason": "consecutive_unproductive_searches",
+                            "trigger_reason": "consecutive_unproductive_searches",
+                            "last_blocked_tool_names": ["web_search"],
+                            "redirect_count": 1,
+                        }
+                    }
+                }
+            }
+        }
+    )
+
+    assert len(events) == 1
+    assert events[0].event_type == "finalization"
+    assert "搜索连续失败或无结果" in events[0].message
+    assert events[0].data["blocked_tool_names"] == ["web_search"]

@@ -54,7 +54,7 @@ def _last_ai_message(state: ResearchState) -> AIMessage | None:
 
 
 class ContextFinalizationMiddleware(AgentMiddleware):
-    """Turn P5 pressure into a bounded, checkpoint-safe terminal mode."""
+    """Turn P5 or unproductive Tool loops into bounded terminal mode."""
 
     state_schema = ResearchState
 
@@ -64,16 +64,40 @@ class ContextFinalizationMiddleware(AgentMiddleware):
         terminal_tools: Iterable[str] = DEFAULT_TERMINAL_TOOLS,
         max_redirects: int = 1,
         max_terminal_tool_calls: int = 3,
+        max_search_attempts: int = 12,
+        max_consecutive_unproductive_searches: int = 4,
+        max_repeated_search_query: int = 2,
+        max_page_reads: int = 12,
+        max_consecutive_page_failures: int = 3,
     ) -> None:
         if max_redirects <= 0:
             raise ValueError("max_redirects 必须大于 0。")
         if max_terminal_tool_calls <= 0:
             raise ValueError("max_terminal_tool_calls 必须大于 0。")
+        for name, value in (
+            ("max_search_attempts", max_search_attempts),
+            (
+                "max_consecutive_unproductive_searches",
+                max_consecutive_unproductive_searches,
+            ),
+            ("max_repeated_search_query", max_repeated_search_query),
+            ("max_page_reads", max_page_reads),
+            ("max_consecutive_page_failures", max_consecutive_page_failures),
+        ):
+            if value <= 0:
+                raise ValueError(f"{name} 必须大于 0。")
         self._terminal_tools = frozenset(
             name.strip() for name in terminal_tools if name.strip()
         )
         self._max_redirects = max_redirects
         self._max_terminal_tool_calls = max_terminal_tool_calls
+        self._max_search_attempts = max_search_attempts
+        self._max_consecutive_unproductive_searches = (
+            max_consecutive_unproductive_searches
+        )
+        self._max_repeated_search_query = max_repeated_search_query
+        self._max_page_reads = max_page_reads
+        self._max_consecutive_page_failures = max_consecutive_page_failures
 
     @staticmethod
     def _context(state: ResearchState) -> Mapping[str, Any]:
@@ -86,18 +110,28 @@ class ContextFinalizationMiddleware(AgentMiddleware):
         pending = context.get("pending_stages")
         p5_pending = isinstance(pending, list) and "P5" in pending
         already_active = previous.get("active") is True
-        if not p5_pending and not already_active:
+        last_ai = _last_ai_message(state)
+        research_budget_reason = self._research_budget_reason(state, last_ai)
+        if not p5_pending and not already_active and research_budget_reason is None:
             return None
 
         budget = _mapping(context.get("budget"))
         utilization_ratio = _ratio(budget.get("utilization_ratio"))
         hard_limit = context.get("hard_limit_reached") is True
-        last_ai = _last_ai_message(state)
+        trigger_reason = previous.get("trigger_reason")
+        if not isinstance(trigger_reason, str) or not trigger_reason:
+            if hard_limit:
+                trigger_reason = "hard_limit"
+            elif p5_pending:
+                trigger_reason = "p5_threshold"
+            else:
+                trigger_reason = research_budget_reason
         if last_ai is None or not last_ai.tool_calls:
             return self._state_update(
                 previous,
                 utilization_ratio=utilization_ratio,
                 reason="model_stopped_tools",
+                trigger_reason=trigger_reason,
             )
 
         tool_names = [
@@ -124,6 +158,7 @@ class ContextFinalizationMiddleware(AgentMiddleware):
                                 reason="terminal_tool_limit",
                                 blocked_tool_names=tool_names,
                                 forced_stop_increment=1,
+                                trigger_reason=trigger_reason,
                             )
                         }
                     },
@@ -134,6 +169,7 @@ class ContextFinalizationMiddleware(AgentMiddleware):
                 utilization_ratio=utilization_ratio,
                 reason="terminal_tool_allowed",
                 terminal_tool_call_increment=len(tool_names),
+                trigger_reason=trigger_reason,
             )
 
         redirect_count = _non_negative_int(previous.get("redirect_count"))
@@ -153,6 +189,7 @@ class ContextFinalizationMiddleware(AgentMiddleware):
                             reason="redirect_limit",
                             blocked_tool_names=tool_names,
                             forced_stop_increment=1,
+                            trigger_reason=trigger_reason,
                         )
                     }
                 },
@@ -164,7 +201,11 @@ class ContextFinalizationMiddleware(AgentMiddleware):
         reminder = HumanMessage(
             id=reminder_id,
             name=CONTEXT_BUDGET_STOP_NAME,
-            content=self._stop_message(utilization_ratio, hard_limit=hard_limit),
+            content=self._stop_message(
+                utilization_ratio,
+                hard_limit=hard_limit,
+                trigger_reason=str(trigger_reason or "research_budget"),
+            ),
             additional_kwargs={
                 "hide_from_ui": True,
                 DEEPRESEARCH_CONTEXT_BUDGET_STOP: True,
@@ -180,10 +221,17 @@ class ContextFinalizationMiddleware(AgentMiddleware):
                     "finalization": self._metrics(
                         previous,
                         utilization_ratio=utilization_ratio,
-                        reason="hard_limit" if hard_limit else "p5_threshold",
+                        reason=(
+                            "hard_limit"
+                            if hard_limit
+                            else "p5_threshold"
+                            if p5_pending
+                            else str(trigger_reason or "research_budget")
+                        ),
                         blocked_tool_names=tool_names,
                         redirect_increment=1,
                         reminder_id=reminder_id,
+                        trigger_reason=trigger_reason,
                     )
                 }
             },
@@ -197,6 +245,7 @@ class ContextFinalizationMiddleware(AgentMiddleware):
         utilization_ratio: float,
         reason: str,
         terminal_tool_call_increment: int = 0,
+        trigger_reason: str | None = None,
     ) -> dict[str, Any]:
         return {
             "governance": {
@@ -208,6 +257,7 @@ class ContextFinalizationMiddleware(AgentMiddleware):
                         terminal_tool_call_increment=(
                             terminal_tool_call_increment
                         ),
+                        trigger_reason=trigger_reason,
                     )
                 }
             }
@@ -224,6 +274,7 @@ class ContextFinalizationMiddleware(AgentMiddleware):
         terminal_tool_call_increment: int = 0,
         forced_stop_increment: int = 0,
         reminder_id: str | None = None,
+        trigger_reason: str | None = None,
     ) -> dict[str, Any]:
         previous_names = previous.get("last_blocked_tool_names")
         if not isinstance(previous_names, list):
@@ -251,6 +302,11 @@ class ContextFinalizationMiddleware(AgentMiddleware):
             ),
             "last_utilization_ratio": utilization_ratio,
             "last_reason": reason,
+            "trigger_reason": (
+                trigger_reason
+                if trigger_reason is not None
+                else previous.get("trigger_reason")
+            ),
             "last_reminder_id": (
                 reminder_id
                 if reminder_id is not None
@@ -331,8 +387,23 @@ class ContextFinalizationMiddleware(AgentMiddleware):
         ).hexdigest()[:16]
 
     @staticmethod
-    def _stop_message(utilization_ratio: float, *, hard_limit: bool) -> str:
-        if hard_limit:
+    def _stop_message(
+        utilization_ratio: float,
+        *,
+        hard_limit: bool,
+        trigger_reason: str,
+    ) -> str:
+        if trigger_reason == "search_attempt_limit":
+            pressure = "网页搜索次数已经达到运行上限"
+        elif trigger_reason == "consecutive_unproductive_searches":
+            pressure = "网页搜索已经连续多次失败或没有结果"
+        elif trigger_reason == "repeated_search_query":
+            pressure = "同一搜索词已经重复尝试多次"
+        elif trigger_reason == "page_read_limit":
+            pressure = "网页读取次数已经达到运行上限"
+        elif trigger_reason == "consecutive_page_failures":
+            pressure = "网页读取已经连续多次失败"
+        elif hard_limit:
             pressure = "上下文窗口已达到 99% 硬限制"
         else:
             pressure = f"上下文窗口占用已达到 {utilization_ratio:.0%}"
@@ -344,6 +415,55 @@ class ContextFinalizationMiddleware(AgentMiddleware):
             "不要再调用工具。\n"
             "</system_reminder>"
         )
+
+    def _research_budget_reason(
+        self,
+        state: ResearchState,
+        last_ai: AIMessage | None,
+    ) -> str | None:
+        """Detect unproductive research loops before their next Tool executes."""
+
+        search_records = list(state.get("search_records", []))
+        if len(search_records) >= self._max_search_attempts:
+            return "search_attempt_limit"
+        consecutive_searches = 0
+        for record in reversed(search_records):
+            if (
+                record.get("success") is True
+                and int(record.get("result_count") or 0) > 0
+            ):
+                break
+            consecutive_searches += 1
+        if consecutive_searches >= self._max_consecutive_unproductive_searches:
+            return "consecutive_unproductive_searches"
+
+        if last_ai is not None:
+            for tool_call in last_ai.tool_calls:
+                if tool_call.get("name") != "web_search":
+                    continue
+                args = tool_call.get("args")
+                raw_query = args.get("query") if isinstance(args, Mapping) else ""
+                query = " ".join(str(raw_query or "").lower().split())
+                repeated = sum(
+                    " ".join(str(record.get("query") or "").lower().split())
+                    == query
+                    for record in search_records
+                    if query
+                )
+                if repeated >= self._max_repeated_search_query:
+                    return "repeated_search_query"
+
+        page_records = list(state.get("page_records", []))
+        if len(page_records) >= self._max_page_reads:
+            return "page_read_limit"
+        consecutive_page_failures = 0
+        for record in reversed(page_records):
+            if record.get("success") is True:
+                break
+            consecutive_page_failures += 1
+        if consecutive_page_failures >= self._max_consecutive_page_failures:
+            return "consecutive_page_failures"
+        return None
 
     @staticmethod
     def _forced_stop_message(tool_names: list[str]) -> str:

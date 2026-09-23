@@ -167,7 +167,7 @@ def test_inspect_reads_sqlite_without_model(monkeypatch, capsys, tmp_path) -> No
     assert "待处理阶段：无" in output
     assert "P1 外化：0 个 Tool 结果；预计节省 0 Token" in output
     assert "P4 压缩：0 次摘要；0 个快照；累计移除 0 条消息" in output
-    assert "P5 收尾：未触发；重定向 0 次；拦截 0 个 Tool Call" in output
+    assert "P5/研究预算收尾：未触发；重定向 0 次；拦截 0 个 Tool Call" in output
     assert "长期记忆：" in output
     assert "当前召回数量：0" in output
     assert "Skills：" in output

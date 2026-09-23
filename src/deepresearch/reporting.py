@@ -127,7 +127,7 @@ def format_governance_summary(state: Mapping[str, Any]) -> str:
             lines.append(f"最近 P4 错误：{compaction_error}")
     if finalization:
         lines.append(
-            "P5 收尾："
+            "P5/研究预算收尾："
             f"{'已触发' if finalization.get('active') is True else '未触发'}；"
             f"重定向 {_non_negative_int(finalization.get('redirect_count')):,} 次；"
             "拦截 "
@@ -137,6 +137,9 @@ def format_governance_summary(state: Mapping[str, Any]) -> str:
             "个收尾 Tool Call；强制停止 "
             f"{_non_negative_int(finalization.get('forced_stop_count')):,} 次"
         )
+        trigger_reason = finalization.get("trigger_reason")
+        if isinstance(trigger_reason, str) and trigger_reason:
+            lines.append(f"收尾触发原因：{trigger_reason}")
         blocked_names = finalization.get("last_blocked_tool_names")
         if isinstance(blocked_names, list) and blocked_names:
             lines.append(
@@ -359,6 +362,7 @@ def format_research_event(event: ResearchEvent) -> str:
         "skill_metrics": "Skill",
         "report_created": "报告",
         "report_evaluated": "评估",
+        "finalization": "收尾",
         "run_completed": "完成",
         "run_failed": "失败",
     }

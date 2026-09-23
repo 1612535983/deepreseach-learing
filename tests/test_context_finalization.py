@@ -8,7 +8,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.graph.message import add_messages
 
-from deepresearch.agent import run_with_model
+from deepresearch.agent import build_agent, run_with_model
 from deepresearch.checkpointing import (
     create_in_memory_checkpointer,
     get_checkpoint_state,
@@ -91,6 +91,126 @@ def test_p5_strips_expansive_tool_call_and_redirects_to_model() -> None:
     assert metrics["blocked_tool_call_count"] == 1
     assert metrics["last_blocked_tool_names"] == ["web_search"]
     assert metrics["last_reason"] == "p5_threshold"
+    assert metrics["trigger_reason"] == "p5_threshold"
+
+
+def test_consecutive_failed_searches_trigger_bounded_finalization() -> None:
+    state = create_initial_state("研究循环")
+    state["search_records"] = [
+        {
+            "query": f"failed-{index}",
+            "success": False,
+            "result_count": 0,
+            "error": "No results",
+        }
+        for index in range(4)
+    ]
+    state["messages"].append(
+        AIMessage(
+            id="loop-ai-call",
+            content="",
+            tool_calls=[
+                {
+                    "name": "web_search",
+                    "args": {"query": "another query"},
+                    "id": "loop-tool-call",
+                    "type": "tool_call",
+                }
+            ],
+        )
+    )
+
+    update = ContextFinalizationMiddleware().after_model(  # type: ignore[arg-type]
+        state, None
+    )
+
+    assert update is not None
+    assert update["jump_to"] == "model"
+    merged = add_messages(state["messages"], update["messages"])
+    assert isinstance(merged[-2], AIMessage)
+    assert merged[-2].tool_calls == []
+    assert isinstance(merged[-1], HumanMessage)
+    assert "连续多次失败或没有结果" in str(merged[-1].content)
+    metrics = update["governance"]["context"]["finalization"]
+    assert metrics["trigger_reason"] == "consecutive_unproductive_searches"
+    assert metrics["last_reason"] == "consecutive_unproductive_searches"
+
+
+def test_repeated_query_is_blocked_before_third_execution() -> None:
+    state = create_initial_state("研究循环")
+    state["search_records"] = [
+        {
+            "query": "LangGraph agent loop",
+            "success": True,
+            "result_count": 2,
+            "error": None,
+        },
+        {
+            "query": "  langgraph   AGENT loop ",
+            "success": True,
+            "result_count": 1,
+            "error": None,
+        },
+    ]
+    state["messages"].append(
+        AIMessage(
+            id="repeat-ai-call",
+            content="",
+            tool_calls=[
+                {
+                    "name": "web_search",
+                    "args": {"query": "langgraph agent loop"},
+                    "id": "repeat-tool-call",
+                    "type": "tool_call",
+                }
+            ],
+        )
+    )
+
+    update = ContextFinalizationMiddleware().after_model(  # type: ignore[arg-type]
+        state, None
+    )
+
+    assert update is not None
+    assert update["governance"]["context"]["finalization"][
+        "trigger_reason"
+    ] == "repeated_search_query"
+    assert "同一搜索词已经重复尝试多次" in str(update["messages"][-1].content)
+
+
+def test_productive_search_resets_consecutive_failure_budget() -> None:
+    state = create_initial_state("正常研究")
+    state["search_records"] = [
+        {
+            "query": "failed",
+            "success": False,
+            "result_count": 0,
+            "error": "No results",
+        },
+        {
+            "query": "productive",
+            "success": True,
+            "result_count": 2,
+            "error": None,
+        },
+    ]
+    state["messages"].append(
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "web_search",
+                    "args": {"query": "different query"},
+                    "id": "normal-call",
+                    "type": "tool_call",
+                }
+            ],
+        )
+    )
+
+    assert ContextFinalizationMiddleware().after_model(  # type: ignore[arg-type]
+        state, None
+    ) is None
 
 
 def test_p5_rebuilds_history_when_model_message_has_no_id() -> None:
@@ -282,6 +402,11 @@ class P5ToolModel(FakeMessagesListChatModel):
         )
 
 
+class LoopToolModel(FakeMessagesListChatModel):
+    def bind_tools(self, tools, *, tool_choice=None, **kwargs):  # noqa: ANN001, ANN003
+        return self
+
+
 def test_agent_blocks_p5_tool_execution_and_finishes_on_next_model_call() -> None:
     P5_TOOL_EXECUTIONS.clear()
     P5ToolModel.call_count = 0
@@ -366,3 +491,45 @@ def test_agent_allows_terminal_tool_execution_during_p5() -> None:
     assert metrics["active"] is True
     assert metrics["terminal_tool_call_count"] == 1
     assert metrics["blocked_tool_call_count"] == 0
+
+
+def test_agent_stops_failed_search_loop_before_tool_executes_again() -> None:
+    P5_TOOL_EXECUTIONS.clear()
+    model = LoopToolModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "web_search",
+                        "args": {"query": "another failed query"},
+                        "id": "blocked-budget-call",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(content="基于已收集资料结束，并说明搜索服务不稳定。"),
+        ]
+    )
+    state = create_initial_state("搜索服务持续失败")
+    state["search_records"] = [
+        {
+            "query": f"failed-{index}",
+            "success": False,
+            "result_count": 0,
+            "error": "No results",
+        }
+        for index in range(4)
+    ]
+    graph = build_agent(model, tools=[tracked_web_search])
+
+    final_state = graph.invoke(state)
+
+    assert P5_TOOL_EXECUTIONS == []
+    assert final_state["messages"][-1].content == (
+        "基于已收集资料结束，并说明搜索服务不稳定。"
+    )
+    metrics = final_state["governance"]["context"]["finalization"]
+    assert metrics["active"] is True
+    assert metrics["trigger_reason"] == "consecutive_unproductive_searches"
+    assert metrics["blocked_tool_call_count"] == 1

@@ -21,6 +21,7 @@ ResearchEventType = Literal[
     "skill_metrics",
     "report_created",
     "report_evaluated",
+    "finalization",
     "run_completed",
     "run_failed",
 ]
@@ -310,6 +311,57 @@ def events_from_update(update: object) -> list[ResearchEvent]:
                             node,
                         )
                     )
+
+        governance = raw_patch.get("governance")
+        if isinstance(governance, dict):
+            context = governance.get("context")
+            finalization = (
+                context.get("finalization") if isinstance(context, dict) else None
+            )
+            if isinstance(finalization, dict) and finalization.get(
+                "last_reason"
+            ) in {
+                "p5_threshold",
+                "hard_limit",
+                "search_attempt_limit",
+                "consecutive_unproductive_searches",
+                "repeated_search_query",
+                "page_read_limit",
+                "consecutive_page_failures",
+                "redirect_limit",
+                "terminal_tool_limit",
+            }:
+                trigger_reason = str(
+                    finalization.get("trigger_reason")
+                    or finalization.get("last_reason")
+                )
+                reason_labels = {
+                    "p5_threshold": "上下文进入 P5",
+                    "hard_limit": "上下文达到硬限制",
+                    "search_attempt_limit": "搜索达到总次数上限",
+                    "consecutive_unproductive_searches": "搜索连续失败或无结果",
+                    "repeated_search_query": "同一搜索词重复过多",
+                    "page_read_limit": "网页读取达到总次数上限",
+                    "consecutive_page_failures": "网页读取连续失败",
+                }
+                events.append(
+                    ResearchEvent(
+                        "finalization",
+                        "已触发有界收尾："
+                        + reason_labels.get(trigger_reason, trigger_reason),
+                        {
+                            "reason": finalization.get("last_reason"),
+                            "trigger_reason": trigger_reason,
+                            "blocked_tool_names": list(
+                                finalization.get("last_blocked_tool_names") or []
+                            ),
+                            "redirect_count": int(
+                                finalization.get("redirect_count") or 0
+                            ),
+                        },
+                        node,
+                    )
+                )
 
         final_report = raw_patch.get("final_report")
         if isinstance(final_report, str) and final_report:

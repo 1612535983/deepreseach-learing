@@ -61,7 +61,7 @@ class ContextCompactionMetrics(TypedDict, total=False):
 
 
 class ContextFinalizationMetrics(TypedDict, total=False):
-    """Cumulative P5 activity and the current terminal-mode status."""
+    """Cumulative context/research-budget terminal-mode activity."""
 
     active: bool
     redirect_count: int
@@ -71,6 +71,7 @@ class ContextFinalizationMetrics(TypedDict, total=False):
     last_blocked_tool_names: list[str]
     last_utilization_ratio: float
     last_reason: str | None
+    trigger_reason: str | None
     last_reminder_id: str | None
 
 

@@ -239,7 +239,7 @@ def test_format_governance_summary_displays_recorded_metrics() -> None:
     assert "P4 压缩：1 次摘要；1 个快照；累计移除 12 条消息" in summary
     assert "预计节省 6,200 Token" in summary
     assert ".deepresearch/snapshots/run/snapshot.json" in summary
-    assert "P5 收尾：已触发；重定向 1 次；拦截 2 个 Tool Call" in summary
+    assert "P5/研究预算收尾：已触发；重定向 1 次；拦截 2 个 Tool Call" in summary
     assert "允许 1 个收尾 Tool Call；强制停止 0 次" in summary
     assert "最近拦截 Tool：web_search, read_page" in summary
     assert "seen_message_usage" not in summary
