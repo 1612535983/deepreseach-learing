@@ -7,7 +7,6 @@ import json
 import os
 import sqlite3
 import threading
-from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
@@ -16,13 +15,77 @@ from uuid import uuid4
 from deepresearch.skill.exceptions import SkillNotFoundError, SkillStoreError
 from deepresearch.skill.types import (
     ParsedSkill,
+    SkillEvaluation,
+    SkillEvolutionExperiment,
     SkillLineage,
     SkillMetrics,
     SkillRecord,
 )
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+_SCHEMA_V2_SQL = """
+CREATE TABLE IF NOT EXISTS skill_evaluations (
+    evaluation_id       TEXT PRIMARY KEY,
+    run_id              TEXT NOT NULL,
+    skill_id            TEXT NOT NULL,
+    signature           TEXT NOT NULL,
+    status              TEXT NOT NULL,
+    provider            TEXT,
+    model               TEXT,
+    applicable          REAL,
+    followed            REAL,
+    helpful             REAL,
+    instruction_defect  REAL,
+    failure_cause       TEXT,
+    report_score        REAL,
+    task_completed      INTEGER NOT NULL DEFAULT 0,
+    answers_json        TEXT NOT NULL DEFAULT '{}',
+    input_chars         INTEGER NOT NULL DEFAULT 0,
+    latency_ms          INTEGER NOT NULL DEFAULT 0,
+    input_tokens        INTEGER NOT NULL DEFAULT 0,
+    output_tokens       INTEGER NOT NULL DEFAULT 0,
+    cost_usd            REAL,
+    notes_json          TEXT NOT NULL DEFAULT '[]',
+    error               TEXT,
+    created_at          TEXT NOT NULL,
+    UNIQUE(run_id, skill_id),
+    FOREIGN KEY (skill_id) REFERENCES skill_records(skill_id)
+);
+CREATE INDEX IF NOT EXISTS idx_skill_evaluations_skill
+    ON skill_evaluations(skill_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS skill_evolution_experiments (
+    experiment_id       TEXT PRIMARY KEY,
+    skill_name          TEXT NOT NULL,
+    baseline_skill_id   TEXT NOT NULL,
+    candidate_skill_id  TEXT NOT NULL UNIQUE,
+    reason              TEXT NOT NULL,
+    mutation_diff       TEXT NOT NULL,
+    changed_lines       INTEGER NOT NULL,
+    status              TEXT NOT NULL,
+    rule_passed         INTEGER NOT NULL DEFAULT 0,
+    recommendation      TEXT NOT NULL,
+    provider            TEXT,
+    model               TEXT,
+    score               REAL,
+    answers_json        TEXT NOT NULL DEFAULT '{}',
+    input_chars         INTEGER NOT NULL DEFAULT 0,
+    latency_ms          INTEGER NOT NULL DEFAULT 0,
+    input_tokens        INTEGER NOT NULL DEFAULT 0,
+    output_tokens       INTEGER NOT NULL DEFAULT 0,
+    cost_usd            REAL,
+    notes_json          TEXT NOT NULL DEFAULT '[]',
+    created_at          TEXT NOT NULL,
+    reviewed_at         TEXT,
+    promoted_at         TEXT,
+    FOREIGN KEY (baseline_skill_id) REFERENCES skill_records(skill_id),
+    FOREIGN KEY (candidate_skill_id) REFERENCES skill_records(skill_id)
+);
+CREATE INDEX IF NOT EXISTS idx_skill_experiments_name
+    ON skill_evolution_experiments(skill_name, created_at DESC);
+"""
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS skill_records (
@@ -79,6 +142,7 @@ CREATE TABLE IF NOT EXISTS skill_outcomes (
     PRIMARY KEY (run_id, skill_id),
     FOREIGN KEY (skill_id) REFERENCES skill_records(skill_id)
 );
+""" + _SCHEMA_V2_SQL + """
 """
 
 
@@ -119,6 +183,34 @@ class SkillStore(Protocol):
 
     def get_metrics(self, skill_id: str) -> SkillMetrics | None: ...
 
+    def save_evaluation(self, evaluation: SkillEvaluation) -> bool: ...
+
+    def list_evaluations(
+        self, skill_id: str, *, limit: int = 20
+    ) -> list[SkillEvaluation]: ...
+
+    def create_experiment(
+        self, experiment: SkillEvolutionExperiment
+    ) -> SkillEvolutionExperiment: ...
+
+    def get_experiment(
+        self, experiment_id: str
+    ) -> SkillEvolutionExperiment | None: ...
+
+    def get_experiment_for_candidate(
+        self, candidate_skill_id: str
+    ) -> SkillEvolutionExperiment | None: ...
+
+    def list_experiments(
+        self, name: str | None = None, *, limit: int = 20
+    ) -> list[SkillEvolutionExperiment]: ...
+
+    def save_experiment_review(
+        self, experiment: SkillEvolutionExperiment
+    ) -> SkillEvolutionExperiment: ...
+
+    def promote_candidate(self, candidate_skill_id: str) -> SkillEvolutionExperiment: ...
+
 
 class SQLiteSkillStore:
     """Thread-safe SQLite index backed by content-addressed Markdown objects."""
@@ -153,7 +245,9 @@ class SQLiteSkillStore:
         """Run the explicit migration chain as future schema versions are added."""
 
         version = from_version
-        migrations: dict[tuple[int, int], object] = {}
+        migrations: dict[tuple[int, int], object] = {
+            (1, 2): lambda conn: conn.executescript(_SCHEMA_V2_SQL),
+        }
         while version < to_version:
             migration = migrations.get((version, version + 1))
             if migration is not None:
@@ -458,6 +552,286 @@ class SQLiteSkillStore:
             failed_runs=record.total_failed_runs,
             injection_rate=record.injection_rate,
             completion_rate=record.completion_rate,
+        )
+
+    def save_evaluation(self, evaluation: SkillEvaluation) -> bool:
+        """Persist one idempotent per-run evaluation for a skill version."""
+
+        with self._mu:
+            cursor = self._conn.execute(
+                """INSERT OR IGNORE INTO skill_evaluations
+                   (evaluation_id, run_id, skill_id, signature, status,
+                    provider, model, applicable, followed, helpful,
+                    instruction_defect, failure_cause, report_score,
+                    task_completed, answers_json, input_chars, latency_ms,
+                    input_tokens, output_tokens, cost_usd, notes_json, error,
+                    created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    evaluation.evaluation_id,
+                    evaluation.run_id,
+                    evaluation.skill_id,
+                    evaluation.signature,
+                    evaluation.status,
+                    evaluation.provider,
+                    evaluation.model,
+                    evaluation.applicable,
+                    evaluation.followed,
+                    evaluation.helpful,
+                    evaluation.instruction_defect,
+                    evaluation.failure_cause,
+                    evaluation.report_score,
+                    1 if evaluation.task_completed else 0,
+                    json.dumps(evaluation.answers, ensure_ascii=False, sort_keys=True),
+                    evaluation.input_chars,
+                    evaluation.latency_ms,
+                    evaluation.input_tokens,
+                    evaluation.output_tokens,
+                    evaluation.cost_usd,
+                    json.dumps(list(evaluation.notes), ensure_ascii=False),
+                    evaluation.error,
+                    evaluation.created_at or _utc_now(),
+                ),
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
+
+    def list_evaluations(
+        self, skill_id: str, *, limit: int = 20
+    ) -> list[SkillEvaluation]:
+        if limit < 1:
+            raise ValueError("limit 必须大于 0。")
+        with self._mu:
+            rows = self._conn.execute(
+                """SELECT * FROM skill_evaluations WHERE skill_id=?
+                   ORDER BY created_at DESC LIMIT ?""",
+                (skill_id, limit),
+            ).fetchall()
+            return [self._row_to_evaluation(row) for row in rows]
+
+    def create_experiment(
+        self, experiment: SkillEvolutionExperiment
+    ) -> SkillEvolutionExperiment:
+        """Persist a newly generated, inactive candidate experiment."""
+
+        with self._mu:
+            self._conn.execute(
+                """INSERT INTO skill_evolution_experiments
+                   (experiment_id, skill_name, baseline_skill_id,
+                    candidate_skill_id, reason, mutation_diff, changed_lines,
+                    status, rule_passed, recommendation, provider, model,
+                    score, answers_json, input_chars, latency_ms, input_tokens,
+                    output_tokens, cost_usd, notes_json, created_at,
+                    reviewed_at, promoted_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    experiment.experiment_id,
+                    experiment.skill_name,
+                    experiment.baseline_skill_id,
+                    experiment.candidate_skill_id,
+                    experiment.reason,
+                    experiment.mutation_diff,
+                    experiment.changed_lines,
+                    experiment.status,
+                    1 if experiment.rule_passed else 0,
+                    experiment.recommendation,
+                    experiment.provider,
+                    experiment.model,
+                    experiment.score,
+                    json.dumps(experiment.answers, ensure_ascii=False, sort_keys=True),
+                    experiment.input_chars,
+                    experiment.latency_ms,
+                    experiment.input_tokens,
+                    experiment.output_tokens,
+                    experiment.cost_usd,
+                    json.dumps(list(experiment.notes), ensure_ascii=False),
+                    experiment.created_at or _utc_now(),
+                    experiment.reviewed_at,
+                    experiment.promoted_at,
+                ),
+            )
+            self._conn.commit()
+        created = self.get_experiment(experiment.experiment_id)
+        if created is None:
+            raise SkillStoreError("Skill 演化实验写入后无法读取。")
+        return created
+
+    def get_experiment(
+        self, experiment_id: str
+    ) -> SkillEvolutionExperiment | None:
+        with self._mu:
+            row = self._conn.execute(
+                "SELECT * FROM skill_evolution_experiments WHERE experiment_id=?",
+                (experiment_id,),
+            ).fetchone()
+            return self._row_to_experiment(row) if row is not None else None
+
+    def get_experiment_for_candidate(
+        self, candidate_skill_id: str
+    ) -> SkillEvolutionExperiment | None:
+        with self._mu:
+            row = self._conn.execute(
+                """SELECT * FROM skill_evolution_experiments
+                   WHERE candidate_skill_id=?""",
+                (candidate_skill_id,),
+            ).fetchone()
+            return self._row_to_experiment(row) if row is not None else None
+
+    def list_experiments(
+        self, name: str | None = None, *, limit: int = 20
+    ) -> list[SkillEvolutionExperiment]:
+        if limit < 1:
+            raise ValueError("limit 必须大于 0。")
+        with self._mu:
+            if name is None:
+                rows = self._conn.execute(
+                    """SELECT * FROM skill_evolution_experiments
+                       ORDER BY created_at DESC LIMIT ?""",
+                    (limit,),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    """SELECT * FROM skill_evolution_experiments
+                       WHERE skill_name=? ORDER BY created_at DESC LIMIT ?""",
+                    (name, limit),
+                ).fetchall()
+            return [self._row_to_experiment(row) for row in rows]
+
+    def save_experiment_review(
+        self, experiment: SkillEvolutionExperiment
+    ) -> SkillEvolutionExperiment:
+        if experiment.status not in {"reviewed", "rejected"}:
+            raise SkillStoreError("评审后的实验状态必须是 reviewed 或 rejected。")
+        with self._mu:
+            cursor = self._conn.execute(
+                """UPDATE skill_evolution_experiments
+                   SET status=?, rule_passed=?, recommendation=?, provider=?,
+                       model=?, score=?, answers_json=?, input_chars=?,
+                       latency_ms=?, input_tokens=?, output_tokens=?, cost_usd=?,
+                       notes_json=?, reviewed_at=?
+                   WHERE experiment_id=? AND status='candidate'""",
+                (
+                    experiment.status,
+                    1 if experiment.rule_passed else 0,
+                    experiment.recommendation,
+                    experiment.provider,
+                    experiment.model,
+                    experiment.score,
+                    json.dumps(experiment.answers, ensure_ascii=False, sort_keys=True),
+                    experiment.input_chars,
+                    experiment.latency_ms,
+                    experiment.input_tokens,
+                    experiment.output_tokens,
+                    experiment.cost_usd,
+                    json.dumps(list(experiment.notes), ensure_ascii=False),
+                    experiment.reviewed_at or _utc_now(),
+                    experiment.experiment_id,
+                ),
+            )
+            if cursor.rowcount == 0:
+                self._conn.rollback()
+                raise SkillStoreError("实验不存在或已经完成评审。")
+            self._conn.commit()
+        reviewed = self.get_experiment(experiment.experiment_id)
+        if reviewed is None:
+            raise SkillStoreError("Skill 演化实验评审后无法读取。")
+        return reviewed
+
+    def promote_candidate(self, candidate_skill_id: str) -> SkillEvolutionExperiment:
+        """Human approval boundary: activate only a positively reviewed candidate."""
+
+        with self._mu:
+            row = self._conn.execute(
+                """SELECT * FROM skill_evolution_experiments
+                   WHERE candidate_skill_id=?""",
+                (candidate_skill_id,),
+            ).fetchone()
+            if row is None:
+                raise SkillStoreError("找不到候选版本对应的演化实验。")
+            experiment = self._row_to_experiment(row)
+            if experiment.status != "reviewed" or experiment.recommendation != "approve":
+                raise SkillStoreError("候选版本尚未通过评审，不能晋级。")
+            candidate = self._conn.execute(
+                "SELECT name FROM skill_records WHERE skill_id=?",
+                (candidate_skill_id,),
+            ).fetchone()
+            if candidate is None:
+                raise SkillNotFoundError(f"Skill 版本不存在：{candidate_skill_id}")
+            timestamp = _utc_now()
+            self._conn.execute(
+                "UPDATE skill_records SET is_active=0 WHERE name=?",
+                (candidate["name"],),
+            )
+            self._conn.execute(
+                """UPDATE skill_records SET is_active=1, enabled=1,
+                   last_updated=? WHERE skill_id=?""",
+                (timestamp, candidate_skill_id),
+            )
+            self._conn.execute(
+                """UPDATE skill_evolution_experiments
+                   SET status='promoted', promoted_at=? WHERE experiment_id=?""",
+                (timestamp, experiment.experiment_id),
+            )
+            self._conn.commit()
+        promoted = self.get_experiment(experiment.experiment_id)
+        if promoted is None:
+            raise SkillStoreError("Skill 晋级后无法读取演化实验。")
+        return promoted
+
+    @staticmethod
+    def _row_to_evaluation(row: sqlite3.Row) -> SkillEvaluation:
+        return SkillEvaluation(
+            evaluation_id=row["evaluation_id"],
+            run_id=row["run_id"],
+            skill_id=row["skill_id"],
+            signature=row["signature"],
+            status=row["status"],
+            provider=row["provider"],
+            model=row["model"],
+            applicable=row["applicable"],
+            followed=row["followed"],
+            helpful=row["helpful"],
+            instruction_defect=row["instruction_defect"],
+            failure_cause=row["failure_cause"],
+            report_score=row["report_score"],
+            task_completed=bool(row["task_completed"]),
+            answers=json.loads(row["answers_json"]),
+            input_chars=row["input_chars"],
+            latency_ms=row["latency_ms"],
+            input_tokens=row["input_tokens"],
+            output_tokens=row["output_tokens"],
+            cost_usd=row["cost_usd"],
+            notes=tuple(json.loads(row["notes_json"])),
+            error=row["error"],
+            created_at=row["created_at"],
+        )
+
+    @staticmethod
+    def _row_to_experiment(row: sqlite3.Row) -> SkillEvolutionExperiment:
+        return SkillEvolutionExperiment(
+            experiment_id=row["experiment_id"],
+            skill_name=row["skill_name"],
+            baseline_skill_id=row["baseline_skill_id"],
+            candidate_skill_id=row["candidate_skill_id"],
+            reason=row["reason"],
+            mutation_diff=row["mutation_diff"],
+            changed_lines=row["changed_lines"],
+            status=row["status"],
+            rule_passed=bool(row["rule_passed"]),
+            recommendation=row["recommendation"],
+            provider=row["provider"],
+            model=row["model"],
+            score=row["score"],
+            answers=json.loads(row["answers_json"]),
+            input_chars=row["input_chars"],
+            latency_ms=row["latency_ms"],
+            input_tokens=row["input_tokens"],
+            output_tokens=row["output_tokens"],
+            cost_usd=row["cost_usd"],
+            notes=tuple(json.loads(row["notes_json"])),
+            created_at=row["created_at"],
+            reviewed_at=row["reviewed_at"],
+            promoted_at=row["promoted_at"],
         )
 
     def _row_to_record(self, row: sqlite3.Row) -> SkillRecord:

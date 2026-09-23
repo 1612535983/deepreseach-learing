@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, TypedDict
+from typing import Any, Literal, TypedDict
 
 
 SkillOrigin = Literal["BUILTIN", "IMPORTED", "CAPTURED", "DERIVED"]
+SkillEvaluationStatus = Literal["completed", "error"]
+SkillExperimentStatus = Literal[
+    "candidate",
+    "reviewed",
+    "promoted",
+    "rejected",
+]
+SkillPromotionRecommendation = Literal["approve", "reject", "pending_human"]
 
 
 @dataclass(frozen=True)
@@ -113,6 +121,64 @@ class SkillMetrics:
     completion_rate: float
 
 
+@dataclass(frozen=True)
+class SkillEvaluation:
+    """One provider-backed judgment for one skill version in one run."""
+
+    evaluation_id: str
+    run_id: str
+    skill_id: str
+    signature: str
+    status: SkillEvaluationStatus
+    provider: str | None = None
+    model: str | None = None
+    applicable: float | None = None
+    followed: float | None = None
+    helpful: float | None = None
+    instruction_defect: float | None = None
+    failure_cause: str | None = None
+    report_score: float | None = None
+    task_completed: bool = False
+    answers: dict[str, dict[str, Any]] = field(default_factory=dict)
+    input_chars: int = 0
+    latency_ms: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float | None = None
+    notes: tuple[str, ...] = ()
+    error: str | None = None
+    created_at: str = ""
+
+
+@dataclass(frozen=True)
+class SkillEvolutionExperiment:
+    """Auditable candidate, review, and human-promotion lifecycle."""
+
+    experiment_id: str
+    skill_name: str
+    baseline_skill_id: str
+    candidate_skill_id: str
+    reason: str
+    mutation_diff: str
+    changed_lines: int
+    status: SkillExperimentStatus = "candidate"
+    rule_passed: bool = False
+    recommendation: SkillPromotionRecommendation = "pending_human"
+    provider: str | None = None
+    model: str | None = None
+    score: float | None = None
+    answers: dict[str, dict[str, Any]] = field(default_factory=dict)
+    input_chars: int = 0
+    latency_ms: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float | None = None
+    notes: tuple[str, ...] = ()
+    created_at: str = ""
+    reviewed_at: str | None = None
+    promoted_at: str | None = None
+
+
 class SkillRef(TypedDict, total=False):
     """Compact, serializable reference saved in ``ResearchState``."""
 
@@ -140,4 +206,8 @@ class SkillRuntimeState(TypedDict, total=False):
     render_signature: str | None
     aligned_tool_calls: int
     completed_recorded: bool
+    evaluation_recorded: bool
+    evaluation_count: int
+    evaluation_status: str | None
+    evaluation_error: str | None
     last_error: str | None

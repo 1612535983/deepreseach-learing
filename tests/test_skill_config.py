@@ -15,6 +15,8 @@ def test_skill_config_is_disabled_by_default(monkeypatch: pytest.MonkeyPatch) ->
     assert config.max_skills == 3
     assert config.token_budget == 2_500
     assert config.include_builtin is True
+    assert config.enable_evaluation is False
+    assert config.evolution_max_changed_lines == 20
 
 
 def test_skill_config_reads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -24,6 +26,9 @@ def test_skill_config_reads_environment(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setenv("DEEPRESEARCH_SKILL_TOKEN_BUDGET", "900")
     monkeypatch.setenv("DEEPRESEARCH_SKILL_MIN_RELEVANCE", "0.2")
     monkeypatch.setenv("DEEPRESEARCH_SKILL_ENABLE_METRICS", "false")
+    monkeypatch.setenv("DEEPRESEARCH_SKILL_ENABLE_EVALUATION", "true")
+    monkeypatch.setenv("DEEPRESEARCH_SKILL_EVOLUTION_MAX_CHANGED_LINES", "12")
+    monkeypatch.setenv("DEEPRESEARCH_SKILL_PROMOTION_THRESHOLD", "0.8")
 
     config = SkillConfig.from_env()
 
@@ -33,6 +38,9 @@ def test_skill_config_reads_environment(monkeypatch: pytest.MonkeyPatch) -> None
     assert config.token_budget == 900
     assert config.min_relevance == 0.2
     assert config.enable_metrics is False
+    assert config.enable_evaluation is True
+    assert config.evolution_max_changed_lines == 12
+    assert config.promotion_threshold == 0.8
 
 
 @pytest.mark.parametrize(

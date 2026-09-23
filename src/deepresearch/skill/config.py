@@ -26,6 +26,10 @@ class SkillConfig:
     min_relevance: float = 0.05
     max_file_chars: int = 50_000
     enable_metrics: bool = True
+    enable_evaluation: bool = False
+    evaluation_body_chars: int = 4_000
+    evolution_max_changed_lines: int = 20
+    promotion_threshold: float = 0.70
 
     def __post_init__(self) -> None:
         if self.max_skills < 1:
@@ -36,6 +40,18 @@ class SkillConfig:
             raise ValueError("DEEPRESEARCH_SKILL_MIN_RELEVANCE 必须在 0 到 1 之间。")
         if self.max_file_chars < 1:
             raise ValueError("DEEPRESEARCH_SKILL_MAX_FILE_CHARS 必须大于 0。")
+        if self.evaluation_body_chars < 1:
+            raise ValueError(
+                "DEEPRESEARCH_SKILL_EVALUATION_BODY_CHARS 必须大于 0。"
+            )
+        if self.evolution_max_changed_lines < 1:
+            raise ValueError(
+                "DEEPRESEARCH_SKILL_EVOLUTION_MAX_CHANGED_LINES 必须大于 0。"
+            )
+        if not 0.0 <= self.promotion_threshold <= 1.0:
+            raise ValueError(
+                "DEEPRESEARCH_SKILL_PROMOTION_THRESHOLD 必须在 0 到 1 之间。"
+            )
 
     @property
     def enabled(self) -> bool:
@@ -75,6 +91,18 @@ class SkillConfig:
             ),
             enable_metrics=_env_bool(
                 "DEEPRESEARCH_SKILL_ENABLE_METRICS", True
+            ),
+            enable_evaluation=_env_bool(
+                "DEEPRESEARCH_SKILL_ENABLE_EVALUATION", False
+            ),
+            evaluation_body_chars=_env_int(
+                "DEEPRESEARCH_SKILL_EVALUATION_BODY_CHARS", 4_000
+            ),
+            evolution_max_changed_lines=_env_int(
+                "DEEPRESEARCH_SKILL_EVOLUTION_MAX_CHANGED_LINES", 20
+            ),
+            promotion_threshold=_env_float(
+                "DEEPRESEARCH_SKILL_PROMOTION_THRESHOLD", 0.70
             ),
         )
 

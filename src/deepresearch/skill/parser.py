@@ -72,6 +72,26 @@ def parse_skill_file(
         content = path.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as exc:
         raise SkillValidationError(f"{path}: 无法读取 UTF-8 文件：{exc}") from exc
+    return parse_skill_content(
+        content,
+        source_path=path,
+        origin=origin,
+        max_file_chars=max_file_chars,
+    )
+
+
+def parse_skill_content(
+    content: str,
+    *,
+    source_path: str | Path,
+    origin: SkillOrigin = "IMPORTED",
+    max_file_chars: int = 50_000,
+) -> ParsedSkill:
+    """Validate in-memory SKILL.md content for generated immutable candidates."""
+
+    path = Path(source_path)
+    if path.name != "SKILL.md":
+        raise SkillValidationError(f"{path}: Skill 入口文件必须命名为 SKILL.md。")
     if len(content) > max_file_chars:
         raise SkillValidationError(
             f"{path}: 文件长度 {len(content)} 超过限制 {max_file_chars}。"

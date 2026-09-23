@@ -152,3 +152,23 @@ def test_store_rejects_database_from_newer_schema(tmp_path: Path) -> None:
 
     with pytest.raises(SkillStoreError, match="高于程序支持版本"):
         SQLiteSkillStore(db_path, tmp_path / "objects")
+
+
+def test_store_migrates_v1_database_with_evaluation_tables(tmp_path: Path) -> None:
+    db_path = tmp_path / "v1.db"
+    connection = sqlite3.connect(db_path)
+    connection.execute("PRAGMA user_version=1")
+    connection.close()
+
+    store = SQLiteSkillStore(db_path, tmp_path / "objects")
+    tables = {
+        row[0]
+        for row in store._conn.execute(  # noqa: SLF001
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+
+    assert "skill_evaluations" in tables
+    assert "skill_evolution_experiments" in tables
+    assert store._conn.execute("PRAGMA user_version").fetchone()[0] == 2  # noqa: SLF001
+    store.close()
