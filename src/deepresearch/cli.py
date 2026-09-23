@@ -12,6 +12,7 @@ from typing import Any
 from dotenv import load_dotenv
 
 from deepresearch.agent import (
+    build_model,
     resume_question,
     run_demo,
     run_question,
@@ -20,6 +21,9 @@ from deepresearch.agent import (
 )
 from deepresearch.checkpointing import get_checkpoint_tuple, open_sqlite_checkpointer
 from deepresearch.events import ResearchEvent
+from deepresearch.config import Settings
+from deepresearch.evaluation.bootstrap import get_evaluation_provider
+from deepresearch.evaluation.config import EvaluationConfig
 from deepresearch.memory.bootstrap import get_memory_provider
 from deepresearch.memory.config import MemoryConfig
 from deepresearch.memory.schema import MemoryType
@@ -27,6 +31,7 @@ from deepresearch.memory.types import MemoryFilter
 from deepresearch.skill.config import SkillConfig
 from deepresearch.skill.manager import BUILTIN_SKILLS_DIR, SkillManager
 from deepresearch.skill.parser import discover_skills
+from deepresearch.skill.evolution import SkillEvolutionService
 from deepresearch.skill.types import SkillRecord
 from deepresearch.reporting import (
     format_evaluation_summary,
@@ -202,6 +207,29 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("identifier", help="Skill 名称或 skill_id")
     rollback = skill_commands.add_parser("rollback", help="切换激活版本")
     rollback.add_argument("skill_id", help="目标历史版本的 skill_id")
+    evaluations = skill_commands.add_parser(
+        "evaluations", help="查看 Skill 版本的运行评估"
+    )
+    evaluations.add_argument("identifier", help="Skill 名称或 skill_id")
+    evaluations.add_argument("--limit", type=int, default=10, help="最多显示条数")
+    evolve = skill_commands.add_parser(
+        "evolve", help="根据运行证据生成未激活的候选版本"
+    )
+    evolve.add_argument("identifier", help="当前激活的 Skill 名称或 skill_id")
+    evolve.add_argument("--reason", required=True, help="本次演化要修复的问题")
+    review = skill_commands.add_parser(
+        "review", help="用确定性规则和 Jev 评审候选版本"
+    )
+    review.add_argument("candidate_skill_id", help="候选版本的 skill_id")
+    promote = skill_commands.add_parser(
+        "promote", help="人工确认并激活已经通过评审的候选版本"
+    )
+    promote.add_argument("candidate_skill_id", help="候选版本的 skill_id")
+    experiments = skill_commands.add_parser(
+        "experiments", help="查看 Skill 演化实验"
+    )
+    experiments.add_argument("name", nargs="?", help="可选的 Skill 名称")
+    experiments.add_argument("--limit", type=int, default=10, help="最多显示条数")
     return parser
 
 
@@ -280,6 +308,88 @@ def _manage_skills(args: argparse.Namespace) -> int:
         if args.skill_command == "rollback":
             manager.store.rollback(args.skill_id)
             print(f"已切换激活版本：{args.skill_id}")
+            return 0
+        if args.skill_command == "evaluations":
+            record = _resolve_skill(manager, args.identifier)
+            evaluations = manager.store.list_evaluations(
+                record.skill_id, limit=args.limit
+            )
+            if not evaluations:
+                print(f"{record.name} [{record.skill_id}] 暂无运行评估。")
+                return 0
+            for evaluation in evaluations:
+                if evaluation.status == "error":
+                    print(
+                        f"{evaluation.created_at} run={evaluation.run_id} error "
+                        f"{evaluation.error or '-'}"
+                    )
+                    continue
+                print(
+                    f"{evaluation.created_at} run={evaluation.run_id} "
+                    f"applicable={evaluation.applicable or 0:.1%} "
+                    f"followed={evaluation.followed or 0:.1%} "
+                    f"helpful={evaluation.helpful or 0:.1%} "
+                    f"defect={evaluation.instruction_defect or 0:.1%} "
+                    f"cause={evaluation.failure_cause or '-'}"
+                )
+            return 0
+        if args.skill_command == "experiments":
+            experiments = manager.store.list_experiments(
+                args.name, limit=args.limit
+            )
+            if not experiments:
+                print("暂无 Skill 演化实验。")
+                return 0
+            for experiment in experiments:
+                score = "-" if experiment.score is None else f"{experiment.score:.3f}"
+                print(
+                    f"{experiment.experiment_id} {experiment.skill_name} "
+                    f"candidate={experiment.candidate_skill_id} "
+                    f"status={experiment.status} "
+                    f"recommendation={experiment.recommendation} score={score}"
+                )
+            return 0
+        if args.skill_command == "evolve":
+            settings = Settings.from_env()
+            service = SkillEvolutionService(
+                manager.store,
+                manager.config,
+                model=build_model(settings),
+                evaluation_config=settings.evaluation,
+            )
+            experiment = service.create_candidate(
+                args.identifier, reason=args.reason
+            )
+            print(f"已生成未激活候选：{experiment.candidate_skill_id}")
+            print(f"实验 ID：{experiment.experiment_id}")
+            print(f"修改行数：{experiment.changed_lines}")
+            print("下一步：运行 skills review，通过后再显式 promote。")
+            return 0
+        if args.skill_command == "review":
+            load_dotenv()
+            evaluation_config = EvaluationConfig.from_env()
+            provider = get_evaluation_provider(evaluation_config)
+            service = SkillEvolutionService(
+                manager.store,
+                manager.config,
+                provider=provider,
+                evaluation_config=evaluation_config,
+            )
+            experiment = service.review_candidate(args.candidate_skill_id)
+            print(
+                f"评审结果：{experiment.recommendation}；"
+                f"score={experiment.score if experiment.score is not None else '-'}"
+            )
+            if experiment.recommendation == "approve":
+                print("候选尚未激活；请人工检查后运行 skills promote。")
+            return 0
+        if args.skill_command == "promote":
+            service = SkillEvolutionService(manager.store, manager.config)
+            experiment = service.promote(args.candidate_skill_id)
+            print(
+                f"已人工晋级：{experiment.candidate_skill_id}；"
+                f"原版本仍保留，可使用 rollback 恢复。"
+            )
             return 0
         record = _resolve_skill(manager, args.identifier)
         if args.skill_command == "show":

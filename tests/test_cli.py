@@ -1,11 +1,15 @@
+from dataclasses import replace
+
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage
 
 from deepresearch.agent import ResearchResult, run_with_model
 from deepresearch.checkpointing import open_sqlite_checkpointer
 from deepresearch.cli import main
+from deepresearch.config import Settings
 from deepresearch.events import ResearchEvent
 from deepresearch.state import create_initial_state
+from deepresearch.skill.types import SkillEvolutionExperiment
 
 
 def test_run_can_show_research_trace(monkeypatch, capsys) -> None:  # noqa: ANN001
@@ -263,3 +267,81 @@ version: 2
     history_output = capsys.readouterr().out
     assert f"[{first_id}] v1 disabled" in history_output
     assert history_output.splitlines()[0].endswith("* active")
+
+
+def test_skills_cli_exposes_controlled_evolution_commands(
+    monkeypatch, capsys, tmp_path
+) -> None:  # noqa: ANN001
+    monkeypatch.chdir(tmp_path)
+    skill_dir = tmp_path / "skills" / "verify"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        """---
+name: verify
+description: 核验来源
+---
+读取一手来源。
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DEEPRESEARCH_SKILL_INCLUDE_BUILTIN", "false")
+    monkeypatch.setenv("DEEPRESEARCH_SKILL_DIRS", str(tmp_path / "skills"))
+    monkeypatch.setenv("DEEPRESEARCH_SKILL_DB_PATH", str(tmp_path / "skills.db"))
+    monkeypatch.setenv(
+        "DEEPRESEARCH_SKILL_STORAGE_PATH", str(tmp_path / "objects")
+    )
+    experiment = SkillEvolutionExperiment(
+        experiment_id="evo_test",
+        skill_name="verify",
+        baseline_skill_id="verify__old",
+        candidate_skill_id="verify__candidate",
+        reason="补充一手来源",
+        mutation_diff="diff",
+        changed_lines=2,
+        status="reviewed",
+        rule_passed=True,
+        recommendation="approve",
+        score=0.88,
+    )
+    received = {}
+
+    def fake_create(self, identifier, *, reason):  # noqa: ANN001, ANN202
+        received["evolve"] = (identifier, reason)
+        return replace(experiment, status="candidate", score=None)
+
+    def fake_review(self, candidate_id):  # noqa: ANN001, ANN202
+        received["review"] = candidate_id
+        return experiment
+
+    def fake_promote(self, candidate_id):  # noqa: ANN001, ANN202
+        received["promote"] = candidate_id
+        return replace(experiment, status="promoted")
+
+    monkeypatch.setattr(
+        "deepresearch.cli.Settings.from_env",
+        lambda: Settings(api_key="test"),
+    )
+    monkeypatch.setattr("deepresearch.cli.build_model", lambda settings: object())
+    monkeypatch.setattr(
+        "deepresearch.cli.SkillEvolutionService.create_candidate", fake_create
+    )
+    monkeypatch.setattr(
+        "deepresearch.cli.SkillEvolutionService.review_candidate", fake_review
+    )
+    monkeypatch.setattr(
+        "deepresearch.cli.SkillEvolutionService.promote", fake_promote
+    )
+
+    assert main(
+        ["skills", "evolve", "verify", "--reason", "补充一手来源"]
+    ) == 0
+    assert "已生成未激活候选：verify__candidate" in capsys.readouterr().out
+    assert main(["skills", "review", "verify__candidate"]) == 0
+    assert "评审结果：approve" in capsys.readouterr().out
+    assert main(["skills", "promote", "verify__candidate"]) == 0
+    assert "已人工晋级：verify__candidate" in capsys.readouterr().out
+    assert received == {
+        "evolve": ("verify", "补充一手来源"),
+        "review": "verify__candidate",
+        "promote": "verify__candidate",
+    }
