@@ -55,6 +55,7 @@ DeepResearch Agent 是一个基于 LangGraph 构建的深度研究 Agent。
 - **可审计**：程序记录真实 Tool 调用、来源、证据和模型可见上下文，不依赖模型描述自己做过什么。
 - **有边界**：通过 Token 治理、搜索与阅读预算、有限 Reflection 和强制收尾避免无限循环。
 - **可扩展**：模型、Tool、Middleware、Memory、Skill 和评估层相互分离。
+- **受控演化**：Skill 可以基于跨任务评估生成候选，经规则与概率评审后由人工晋级，并保留旧版本回滚。
 - **适合学习**：模块职责明确，提供离线 Demo、自动化测试、名词解释和分阶段阅读路线。
 
 ## 快速开始
@@ -85,7 +86,7 @@ uv run deepresearch demo
 uv run pytest -q
 ```
 
-当前项目包含 **302 个自动化测试**，覆盖 Agent、Tool、Middleware、Checkpoint、上下文治理、Memory、Skill 和报告评估。
+当前项目包含 **315 个自动化测试**，覆盖 Agent、Tool、Middleware、Checkpoint、上下文治理、Memory、Skill、报告评估和受控 Skill 演化。
 
 ### 接入真实模型
 
@@ -138,6 +139,7 @@ flowchart LR
     K[Context Governance] -.外化 / 压缩 / 收尾.-> F
     L[(Skill Registry)] -.注入研究方法.-> B
     M[Report Evaluation] -.质量观测 / 有界回跳.-> G
+    N[Skill Evolution] -.评估 / 候选 / 人工晋级.-> L
 ```
 
 整个流程可以理解为：
@@ -188,6 +190,7 @@ flowchart TB
 | Memory | 已完成任务和当前问题 | 可跨任务召回的记忆 | 复用过去任务中的有效信息 |
 | Skill | `SKILL.md`、问题、可用 Tool | 受预算限制的过程知识 | 复用“应该怎样研究”的方法 |
 | Evaluation | 问题、报告、来源和证据 | 概率、质量分和建议动作 | 观测报告质量并有限控制回跳 |
+| Skill Evolution | 运行评估、当前版本、人工修复原因 | 未激活候选、评审记录、可晋级版本 | 让过程知识可实验、可审计、可回滚地改进 |
 
 ## 项目结构
 
@@ -203,8 +206,8 @@ flowchart TB
 │   ├── middlewares/         # 证据、反思、治理、记忆等横切逻辑
 │   ├── context/             # Token、外化、快照、摘要和收尾策略
 │   ├── memory/              # 长期记忆存储、检索与 Worker
-│   ├── skill/               # Skill 解析、版本、选择、注入和指标
-│   └── evaluation/          # 报告概率评估与 Provider 适配
+│   ├── skill/               # Skill 解析、版本、选择、注入、指标和受控演化
+│   └── evaluation/          # 报告/Skill 概率评估与 Provider 适配
 ├── tests/                   # 自动化测试
 ├── examples/                # 输出样例
 ├── docs/assets/             # README 素材
@@ -226,6 +229,7 @@ flowchart TB
 | 6. 理解上下文工程 | `context/`、相关 Middleware | 上下文过长时，怎样外化、压缩并安全收尾？ | 调低阈值观察治理事件 |
 | 7. 理解能力复用 | `memory/`、`skill/` | “记住什么”和“应该怎样做”有什么区别？ | 编写一个自己的 `SKILL.md` |
 | 8. 理解质量评估 | `evaluation/` | 概率评估怎样进入系统，又怎样避免失控回跳？ | 使用 Shadow 模式收集结果 |
+| 9. 理解受控演化 | `evaluation/skill.py`、`skill/evolution.py` | 怎样把评估信号变成候选，而不让模型直接改线上 Skill？ | 生成、评审并人工晋级一个候选版本 |
 
 推荐的完整代码阅读顺序：
 
@@ -336,6 +340,44 @@ uv run deepresearch run "核验这项声明并给出来源" --skill source-verif
 
 项目自带 `web-research`、`source-verification` 和 `evidence-report-writing` 三个 Skill。Skill 使用不可变版本和内容哈希，保证旧任务恢复时仍能读取当时使用的版本。
 
+### Skill 运行评估与受控演化
+
+启用 Skill 运行评估后，程序会在任务结束时把有限长度的研究问题、报告、执行统计和实际注入的 Skill 发送给同一个概率评估 Provider：
+
+```dotenv
+DEEPRESEARCH_SKILL_ENABLE_EVALUATION=true
+DEEPRESEARCH_EVALUATION_USE=jev
+DEEPRESEARCH_JEV_API_KEY=your-typesafe-api-key
+```
+
+评估回答五个问题：Skill 是否适用、Agent 是否遵循、是否带来帮助、指令本身是否可能有缺陷，以及失败更可能来自 Skill、模型执行、Tool/来源还是任务已经成功。结果以 `(run_id, skill_id)` 幂等写入 Skill SQLite Store；Provider 失败采用 fail-open，不影响研究结果。
+
+受控演化分成三个显式步骤：
+
+```bash
+# 1. 研究模型根据人工原因和历史运行评估生成未激活候选
+uv run deepresearch skills evolve source-verification \
+  --reason "历史评估显示关键结论缺少逐项引用"
+
+# 2. 确定性规则 + Jev 对 baseline/candidate 做有界评审
+uv run deepresearch skills review source-verification__candidate_id
+
+# 3. 只有评审通过后，人工命令才能激活候选
+uv run deepresearch skills promote source-verification__candidate_id
+```
+
+辅助检查命令：
+
+```bash
+uv run deepresearch skills evaluations source-verification
+uv run deepresearch skills experiments source-verification
+uv run deepresearch skills history source-verification
+```
+
+这里的职责边界是：研究模型只生成候选，Jev 只提供概率信号，程序负责修改行数预算、元数据不变式和晋级阈值，最终激活必须由人确认。运行评估失败不会阻断用户任务；候选评审失败则 fail-closed，禁止晋级。
+
+> 当前版本是“受控演化”，不是无人值守的自进化。候选评审比较 Skill 文本与历史运行证据，尚未在固定任务集上重新运行 baseline/candidate，也没有 Canary 自动放量。不能把静态评审分数解释为真实线上收益。
+
 </details>
 
 <details>
@@ -391,6 +433,7 @@ DEEPRESEARCH_JEV_API_KEY=your-typesafe-api-key
 - MCP 与独立 Sandbox；
 - 多 Agent 并行研究；
 - 使用人工标注数据完成概率校准；
+- 固定任务集上的 Skill baseline/candidate A/B 重放与 Canary 发布；
 - 对事实正确率、报告质量和成本进行系统 Benchmark。
 
 后续计划优先补充评估数据集，计算 Brier Score、ECE 和质量/成本指标，再考虑 MCP、Sandbox、API、前端与多 Agent。
