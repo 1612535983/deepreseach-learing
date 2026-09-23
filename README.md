@@ -11,7 +11,7 @@
 [![Tests](https://github.com/1612535983/deepreseach-learing/actions/workflows/tests.yml/badge.svg)](https://github.com/1612535983/deepreseach-learing/actions/workflows/tests.yml)
 ![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)
 ![LangGraph](https://img.shields.io/badge/LangGraph-Stateful_Agent-1C3C3C)
-![Tests](https://img.shields.io/badge/tests-299_passed-2EA44F)
+![Tests](https://img.shields.io/badge/tests-300_passed-2EA44F)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 [快速开始](#快速开始) · [工作流程](#工作流程) · [核心设计](#核心设计) · [Skill](#skill-系统) · [学习路线](#分阶段实现路线) · [示例报告](examples/sample-report.md)
@@ -55,7 +55,7 @@ DeepResearch Agent 是一个面向学习与工程实践的 LangGraph 研究 Agen
 |---|---|---|
 | 计划、搜索、正文读取、证据聚合、引用校验、报告生成 | SQLite Checkpoint、`thread_id` 隔离、流式事件、任务恢复 | Token 观测、P1 外化、P4 摘要压缩、P5 强制收尾 |
 | **🧠 长期记忆** | **🧩 Skill 系统** | **✅ 工程质量** |
-| Markdown truth store、BM25 召回、衰减、软遗忘、后台巩固 | `SKILL.md`、不可变版本、BM25 选择、预算注入、效果指标 | 299 个测试、离线 Demo、GitHub Actions、模块化 Middleware |
+| Markdown truth store、BM25 召回、衰减、软遗忘、后台巩固 | `SKILL.md`、不可变版本、BM25 选择、预算注入、效果指标 | 300 个测试、离线 Demo、GitHub Actions、模块化 Middleware |
 | **🎯 概率评估** | **🔁 语义 Reflection** | **📊 评估遥测** |
 | 相关性、证据支持、引用充分、证据足够概率与来源质量分 | Shadow 安全观测、Gate 有限回跳、P5 优先收尾 | Checkpoint、事件、Trace 中的延迟、Token、成本与质量分 |
 
@@ -482,6 +482,8 @@ LangChain 消息。随后由内部摘要调用压缩较旧前缀，最近约 6 �
 事件说明原因。搜索预算只限制 `web_search`，读取预算只限制 `read_page`；模型已经主动调用
 `update_plan_step` 或 `write_final_report` 时不会触发研究预算收尾。
 模型获得一次使用已有证据更新计划和写报告的机会；如果仍请求扩张型 Tool，则有界强制结束。
+P5 因上下文紧张最多允许 3 次收尾 Tool；搜索/读取失败触发的收尾最多允许 8 次，以容纳至多
+5 个计划步骤的整理以及有限的报告校验重试。
 `demo` 模式仍使用无工具的 Fake Model，保证在没有网络和 API Key 时也能验证基础链路。
 
 `.env` 已被 `.gitignore` 排除，真实 API Key 不会进入 Git。
@@ -500,7 +502,7 @@ deepresearch-agent/
 │   ├── evaluation/          # Jev Provider、受控 Payload、概率合成与契约
 │   ├── middlewares/         # 证据、反思、评估、治理、记忆等横切逻辑
 │   └── tools/               # 搜索、网页读取、计划和最终报告
-├── tests/                   # 299 个自动化测试
+├── tests/                   # 300 个自动化测试
 ├── examples/                # 可公开查看的输出样例
 ├── .github/workflows/       # GitHub Actions 自动测试
 └── pyproject.toml           # 依赖、脚本入口与打包配置

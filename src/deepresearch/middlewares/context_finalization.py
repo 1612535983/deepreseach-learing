@@ -64,6 +64,7 @@ class ContextFinalizationMiddleware(AgentMiddleware):
         terminal_tools: Iterable[str] = DEFAULT_TERMINAL_TOOLS,
         max_redirects: int = 1,
         max_terminal_tool_calls: int = 3,
+        max_research_terminal_tool_calls: int = 8,
         max_search_attempts: int = 12,
         max_consecutive_unproductive_searches: int = 4,
         max_repeated_search_query: int = 2,
@@ -74,6 +75,8 @@ class ContextFinalizationMiddleware(AgentMiddleware):
             raise ValueError("max_redirects 必须大于 0。")
         if max_terminal_tool_calls <= 0:
             raise ValueError("max_terminal_tool_calls 必须大于 0。")
+        if max_research_terminal_tool_calls <= 0:
+            raise ValueError("max_research_terminal_tool_calls 必须大于 0。")
         for name, value in (
             ("max_search_attempts", max_search_attempts),
             (
@@ -91,6 +94,7 @@ class ContextFinalizationMiddleware(AgentMiddleware):
         )
         self._max_redirects = max_redirects
         self._max_terminal_tool_calls = max_terminal_tool_calls
+        self._max_research_terminal_tool_calls = max_research_terminal_tool_calls
         self._max_search_attempts = max_search_attempts
         self._max_consecutive_unproductive_searches = (
             max_consecutive_unproductive_searches
@@ -142,7 +146,12 @@ class ContextFinalizationMiddleware(AgentMiddleware):
             terminal_count = _non_negative_int(
                 previous.get("terminal_tool_call_count")
             )
-            if terminal_count + len(tool_names) > self._max_terminal_tool_calls:
+            terminal_limit = (
+                self._max_terminal_tool_calls
+                if trigger_reason in {"p5_threshold", "hard_limit"}
+                else self._max_research_terminal_tool_calls
+            )
+            if terminal_count + len(tool_names) > terminal_limit:
                 stopped = self._strip_tool_calls(
                     last_ai,
                     utilization_ratio,
