@@ -11,7 +11,7 @@
 [![Tests](https://github.com/1612535983/deepreseach-learing/actions/workflows/tests.yml/badge.svg)](https://github.com/1612535983/deepreseach-learing/actions/workflows/tests.yml)
 ![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)
 ![LangGraph](https://img.shields.io/badge/LangGraph-Stateful_Agent-1C3C3C)
-![Tests](https://img.shields.io/badge/tests-300_passed-2EA44F)
+![Tests](https://img.shields.io/badge/tests-302_passed-2EA44F)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 [快速开始](#快速开始) · [工作流程](#工作流程) · [核心设计](#核心设计) · [Skill](#skill-系统) · [学习路线](#分阶段实现路线) · [示例报告](examples/sample-report.md)
@@ -55,7 +55,7 @@ DeepResearch Agent 是一个面向学习与工程实践的 LangGraph 研究 Agen
 |---|---|---|
 | 计划、搜索、正文读取、证据聚合、引用校验、报告生成 | SQLite Checkpoint、`thread_id` 隔离、流式事件、任务恢复 | Token 观测、P1 外化、P4 摘要压缩、P5 强制收尾 |
 | **🧠 长期记忆** | **🧩 Skill 系统** | **✅ 工程质量** |
-| Markdown truth store、BM25 召回、衰减、软遗忘、后台巩固 | `SKILL.md`、不可变版本、BM25 选择、预算注入、效果指标 | 300 个测试、离线 Demo、GitHub Actions、模块化 Middleware |
+| Markdown truth store、BM25 召回、衰减、软遗忘、后台巩固 | `SKILL.md`、不可变版本、BM25 选择、预算注入、效果指标 | 302 个测试、离线 Demo、GitHub Actions、模块化 Middleware |
 | **🎯 概率评估** | **🔁 语义 Reflection** | **📊 评估遥测** |
 | 相关性、证据支持、引用充分、证据足够概率与来源质量分 | Shadow 安全观测、Gate 有限回跳、P5 优先收尾 | Checkpoint、事件、Trace 中的延迟、Token、成本与质量分 |
 
@@ -340,7 +340,8 @@ uv run deepresearch run "研究 LangChain Agent" \
   --output reports/langchain-agent.md
 ```
 
-`--output` 只负责把 `State.final_report` 写入磁盘，不会调用 LLM，也不会覆盖已有文件。
+`--output` 会把 `State.final_report` 写入磁盘；如果 Jev 已完成评估，还会在正文末尾追加
+由程序生成的“Jev 报告质量评估”章节。它不会额外调用 LLM，也不会覆盖已有文件。
 LLM 负责生成 Markdown 内容；`write_final_report` Tool 负责校验引用并更新 State；
 `save_markdown_report()` 才是真正创建 `.md` 文件的代码。
 
@@ -502,7 +503,7 @@ deepresearch-agent/
 │   ├── evaluation/          # Jev Provider、受控 Payload、概率合成与契约
 │   ├── middlewares/         # 证据、反思、评估、治理、记忆等横切逻辑
 │   └── tools/               # 搜索、网页读取、计划和最终报告
-├── tests/                   # 300 个自动化测试
+├── tests/                   # 302 个自动化测试
 ├── examples/                # 可公开查看的输出样例
 ├── .github/workflows/       # GitHub Actions 自动测试
 └── pyproject.toml           # 依赖、脚本入口与打包配置

@@ -3,6 +3,7 @@ from langchain_core.messages import HumanMessage
 
 from deepresearch.reporting import (
     calculate_stats,
+    format_evaluation_markdown,
     format_evaluation_summary,
     format_governance_summary,
     format_memory_summary,
@@ -163,6 +164,47 @@ def test_format_evaluation_summary_displays_probabilities_and_cost() -> None:
     assert "调用统计：321 ms；输入 500 Token；输出 12 Token；成本 $0.003000" in summary
 
 
+def test_format_evaluation_markdown_renders_report_appendix() -> None:
+    state = make_state()
+    state["evaluation"] = {
+        "report": {
+            "status": "completed",
+            "mode": "shadow",
+            "provider": "jev",
+            "model": "jev-1.13.0",
+            "composite_score": 0.729,
+            "recommended_action": "revise_report",
+            "runtime_action": "observed",
+            "latency_ms": 912,
+            "input_tokens": 6106,
+            "output_tokens": 116,
+            "cost_usd": None,
+            "evaluated_at": "2026-09-23T01:02:03+00:00",
+            "answers": {
+                "answer_relevance": {"type": "noul", "value": 0.95},
+                "evidence_support": {"type": "noul", "value": 0.57},
+                "citation_coverage": {"type": "noul", "value": 0.64},
+                "evidence_sufficient": {"type": "noul", "value": 0.73},
+                "continue_research": {"type": "noul", "value": 0.26},
+                "source_quality": {
+                    "type": "score",
+                    "value": 2.82,
+                    "confidence": 0.82,
+                },
+            },
+        }
+    }
+
+    appendix = format_evaluation_markdown(state)
+
+    assert "## Jev 报告质量评估" in appendix
+    assert "Shadow（仅观察，不自动修改报告）" in appendix
+    assert "综合质量分：**72.9%**" in appendix
+    assert "| 证据支持概率 | 57.0% | — |" in appendix
+    assert "| 来源质量评分 | 2.82 / 3 | 82.0% |" in appendix
+    assert "成本：Provider 未提供" in appendix
+
+
 def test_format_governance_summary_displays_recorded_metrics() -> None:
     state = make_state()
     state["governance"] = {
@@ -312,6 +354,31 @@ def test_save_markdown_report_writes_final_report(tmp_path) -> None:  # noqa: AN
 
     assert saved_path == output_path
     assert output_path.read_text(encoding="utf-8") == "# 测试报告\n\n正文\n"
+
+
+def test_save_markdown_report_appends_completed_jev_evaluation(tmp_path) -> None:  # noqa: ANN001
+    state = make_state()
+    state["final_report"] = "# 测试报告\n\n正文"
+    state["evaluation"] = {
+        "report": {
+            "status": "completed",
+            "mode": "gate",
+            "provider": "jev",
+            "model": "jev-latest",
+            "composite_score": 0.81,
+            "recommended_action": "pass",
+            "runtime_action": "pass",
+            "answers": {},
+        }
+    }
+    output_path = tmp_path / "result.md"
+
+    save_markdown_report(state, output_path)
+
+    saved = output_path.read_text(encoding="utf-8")
+    assert saved.startswith("# 测试报告\n\n正文\n\n---\n")
+    assert "## Jev 报告质量评估" in saved
+    assert "综合质量分：**81.0%**" in saved
 
 
 def test_save_markdown_report_does_not_overwrite_existing_file(tmp_path) -> None:  # noqa: ANN001

@@ -291,6 +291,124 @@ def format_evaluation_summary(state: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def format_evaluation_markdown(state: Mapping[str, Any]) -> str:
+    """Render a deterministic Jev appendix for an exported Markdown report."""
+
+    report = _mapping(_mapping(state.get("evaluation")).get("report"))
+    status = str(report.get("status") or "not_run")
+    if status == "not_run" or not report:
+        return ""
+
+    mode = str(report.get("mode") or "unknown")
+    mode_labels = {
+        "shadow": "Shadow（仅观察，不自动修改报告）",
+        "gate": "Gate（可触发一次有界修订）",
+    }
+    action_labels = {
+        "pass": "通过",
+        "revise_report": "修订报告",
+        "continue_research": "继续研究",
+        "review": "人工复核",
+        "observed": "仅记录结果",
+        "review_required": "需要人工复核",
+        "p5_bypass": "P5 强制收尾，未继续干预",
+        "gate_exhausted": "Gate 次数已用尽",
+        "fail_open": "评估失败，研究流程继续",
+    }
+    lines = [
+        "---",
+        "",
+        "## Jev 报告质量评估",
+        "",
+        "> 本节由程序在报告生成后追加，不属于研究正文。",
+        "",
+        f"- 状态：{status}",
+        f"- 模式：{mode_labels.get(mode, mode)}",
+    ]
+
+    if status == "error":
+        error = report.get("last_error")
+        lines.append(
+            f"- 错误：{error if isinstance(error, str) and error else '评估失败'}"
+        )
+        lines.append("- 运行策略：Fail-open（评估失败不阻断报告生成）")
+        return "\n".join(lines)
+
+    score = report.get("composite_score")
+    score_text = (
+        f"{float(score):.1%}"
+        if isinstance(score, (int, float)) and not isinstance(score, bool)
+        else "未知"
+    )
+    recommended = str(report.get("recommended_action") or "无")
+    runtime = str(report.get("runtime_action") or "无")
+    lines.extend(
+        [
+            (
+                "- Provider / 模型："
+                f"{report.get('provider') or '未知'} / {report.get('model') or '未知'}"
+            ),
+            f"- 综合质量分：**{score_text}**",
+            f"- 建议动作：{action_labels.get(recommended, recommended)}",
+            f"- 实际动作：{action_labels.get(runtime, runtime)}",
+            "",
+            "### 分项结果",
+            "",
+            "| 指标 | 结果 | 置信度 |",
+            "| --- | ---: | ---: |",
+        ]
+    )
+    answer_labels = {
+        "answer_relevance": "回答相关概率",
+        "evidence_support": "证据支持概率",
+        "citation_coverage": "引用充分概率",
+        "evidence_sufficient": "证据足够概率",
+        "continue_research": "继续研究概率",
+        "source_quality": "来源质量评分",
+    }
+    answers = _mapping(report.get("answers"))
+    for name, label in answer_labels.items():
+        answer = _mapping(answers.get(name))
+        value = answer.get("value")
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            continue
+        result_text = (
+            f"{float(value):.2f} / 3"
+            if answer.get("type") == "score"
+            else f"{float(value):.1%}"
+        )
+        confidence = answer.get("confidence")
+        confidence_text = (
+            f"{float(confidence):.1%}"
+            if isinstance(confidence, (int, float))
+            and not isinstance(confidence, bool)
+            else "—"
+        )
+        lines.append(f"| {label} | {result_text} | {confidence_text} |")
+
+    cost = report.get("cost_usd")
+    cost_text = (
+        f"${float(cost):.6f}"
+        if isinstance(cost, (int, float)) and not isinstance(cost, bool)
+        else "Provider 未提供"
+    )
+    lines.extend(
+        [
+            "",
+            "### 调用统计",
+            "",
+            f"- 延迟：{_non_negative_int(report.get('latency_ms'))} ms",
+            (
+                f"- Token：输入 {_non_negative_int(report.get('input_tokens'))} / "
+                f"输出 {_non_negative_int(report.get('output_tokens'))}"
+            ),
+            f"- 成本：{cost_text}",
+            f"- 评估时间：{report.get('evaluated_at') or '未知'}",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def calculate_stats(state: ResearchState) -> ResearchStats:
     """Calculate mutually understandable counters from a completed state."""
 
@@ -323,7 +441,7 @@ def save_markdown_report(
     state: ResearchState,
     output_path: str | Path,
 ) -> Path:
-    """Write ``final_report`` to a new Markdown file and return its path."""
+    """Write ``final_report`` and its Jev evaluation to a new Markdown file."""
 
     report = state.get("final_report")
     if not report:
@@ -336,8 +454,14 @@ def save_markdown_report(
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("x", encoding="utf-8") as output_file:
-            output_file.write(report)
-            if not report.endswith("\n"):
+            report_text = str(report)
+            output_file.write(report_text)
+            if not report_text.endswith("\n"):
+                output_file.write("\n")
+            evaluation_markdown = format_evaluation_markdown(state)
+            if evaluation_markdown:
+                output_file.write("\n")
+                output_file.write(evaluation_markdown)
                 output_file.write("\n")
     except FileExistsError as exc:
         raise ValueError(f"报告文件已存在，不会覆盖：{path}") from exc
