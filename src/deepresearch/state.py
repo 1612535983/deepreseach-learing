@@ -261,6 +261,10 @@ def create_initial_skill_state() -> SkillRuntimeState:
         "render_signature": None,
         "aligned_tool_calls": 0,
         "completed_recorded": False,
+        "evaluation_recorded": False,
+        "evaluation_count": 0,
+        "evaluation_status": None,
+        "evaluation_error": None,
         "last_error": None,
     }
 

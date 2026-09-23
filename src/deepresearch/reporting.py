@@ -195,6 +195,11 @@ def format_skill_summary(state: Mapping[str, Any]) -> str:
         f"注入 Token：{_non_negative_int(skills.get('injected_tokens')):,}",
         f"预算丢弃数量：{len(dropped):,}",
         f"匹配 Tool Call：{_non_negative_int(skills.get('aligned_tool_calls')):,}",
+        (
+            "运行评估："
+            f"{skills.get('evaluation_status') or '未执行'}；"
+            f"{_non_negative_int(skills.get('evaluation_count')):,} 个版本"
+        ),
         "选中版本：",
     ]
     if not selected:
@@ -217,6 +222,9 @@ def format_skill_summary(state: Mapping[str, Any]) -> str:
     last_error = skills.get("last_error")
     if isinstance(last_error, str) and last_error:
         lines.append(f"最近 Skill 错误：{last_error}")
+    evaluation_error = skills.get("evaluation_error")
+    if isinstance(evaluation_error, str) and evaluation_error:
+        lines.append(f"最近 Skill 评估错误：{evaluation_error}")
     return "\n".join(lines)
 
 
@@ -484,6 +492,7 @@ def format_research_event(event: ResearchEvent) -> str:
         "skill_selected": "Skill",
         "skill_injected": "Skill",
         "skill_metrics": "Skill",
+        "skill_evaluated": "Skill",
         "report_created": "报告",
         "report_evaluated": "评估",
         "finalization": "收尾",

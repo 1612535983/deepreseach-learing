@@ -201,6 +201,29 @@ def test_skill_selection_reset_does_not_emit_injection_event() -> None:
     assert [event.event_type for event in events] == ["skill_selected"]
 
 
+def test_skill_evaluation_emits_safe_shadow_event() -> None:
+    events = events_from_update(
+        {
+            "SkillEvaluationMiddleware.after_agent": {
+                "skills": {
+                    "evaluation_recorded": True,
+                    "evaluation_count": 2,
+                    "evaluation_status": "completed",
+                    "evaluation_error": None,
+                }
+            }
+        }
+    )
+
+    assert len(events) == 1
+    assert events[0].event_type == "skill_evaluated"
+    assert events[0].data == {
+        "status": "completed",
+        "count": 2,
+        "error": None,
+    }
+
+
 def test_report_evaluation_emits_safe_cost_and_quality_event() -> None:
     secret_report = "do not expose report body"
     update = {

@@ -334,6 +334,10 @@ def test_format_skill_summary_displays_versioned_runtime_metrics() -> None:
         "injected_tokens": 80,
         "aligned_tool_calls": 2,
         "completed_recorded": True,
+        "evaluation_recorded": True,
+        "evaluation_count": 1,
+        "evaluation_status": "completed",
+        "evaluation_error": None,
         "last_error": None,
     }
 
@@ -343,6 +347,7 @@ def test_format_skill_summary_displays_versioned_runtime_metrics() -> None:
     assert "verify [verify__abc]：0.7500" in summary
     assert "注入 Token：80" in summary
     assert "匹配 Tool Call：2" in summary
+    assert "运行评估：completed；1 个版本" in summary
 
 
 def test_save_markdown_report_writes_final_report(tmp_path) -> None:  # noqa: ANN001

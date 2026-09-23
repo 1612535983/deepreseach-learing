@@ -19,6 +19,7 @@ ResearchEventType = Literal[
     "skill_selected",
     "skill_injected",
     "skill_metrics",
+    "skill_evaluated",
     "report_created",
     "report_evaluated",
     "finalization",
@@ -263,6 +264,25 @@ def events_from_update(update: object) -> list[ResearchEvent]:
                         "skill_metrics",
                         f"Skill 效果已记录，匹配 Tool Call {aligned} 次",
                         {"aligned_tool_calls": aligned},
+                        node,
+                    )
+                )
+            if skills.get("evaluation_recorded") is True:
+                status = str(skills.get("evaluation_status") or "completed")
+                count = int(skills.get("evaluation_count") or 0)
+                events.append(
+                    ResearchEvent(
+                        "skill_evaluated",
+                        (
+                            f"Skill Shadow 评估完成，记录 {count} 个版本"
+                            if status == "completed"
+                            else "Skill Shadow 评估失败，研究流程已继续"
+                        ),
+                        {
+                            "status": status,
+                            "count": count,
+                            "error": skills.get("evaluation_error"),
+                        },
                         node,
                     )
                 )

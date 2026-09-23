@@ -13,6 +13,12 @@ from deepresearch.evaluation.report import (
     ReportEvaluator,
     build_report_evaluation_payload,
 )
+from deepresearch.evaluation.skill import (
+    SKILL_EVALUATION_SCHEMA,
+    SkillEvaluationPayload,
+    SkillRunEvaluator,
+    build_skill_evaluation_payload,
+)
 from deepresearch.evaluation.types import (
     DecisionAnswer,
     DecisionQuestion,
@@ -41,6 +47,10 @@ __all__ = [
     "ReportEvaluationResult",
     "ReportEvaluator",
     "ReportEvaluationState",
+    "SKILL_EVALUATION_SCHEMA",
+    "SkillEvaluationPayload",
+    "SkillRunEvaluator",
     "DecisionProvider",
     "build_report_evaluation_payload",
+    "build_skill_evaluation_payload",
 ]

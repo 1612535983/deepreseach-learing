@@ -32,6 +32,7 @@ from deepresearch.evaluation.bootstrap import get_evaluation_provider
 from deepresearch.evaluation.config import EvaluationConfig
 from deepresearch.evaluation.provider import DecisionProvider
 from deepresearch.evaluation.report import ReportEvaluator
+from deepresearch.evaluation.skill import SkillRunEvaluator
 from deepresearch.memory.config import MemoryConfig
 from deepresearch.memory.context import MemoryContextRenderer
 from deepresearch.memory.provider import MemoryProvider
@@ -57,6 +58,7 @@ from deepresearch.middlewares import (
     ReportEvaluationMiddleware,
     SequentialToolCallMiddleware,
     SkillInjectionMiddleware,
+    SkillEvaluationMiddleware,
     SkillMetricsMiddleware,
     SkillSelectionMiddleware,
     TaggedContextMiddleware,
@@ -228,6 +230,21 @@ def build_agent(
         )
         if resolved_skill_config.enable_metrics:
             middlewares.append(SkillMetricsMiddleware(skill_manager))
+        if resolved_skill_config.enable_evaluation:
+            if evaluation_provider is None:
+                raise ValueError(
+                    "启用 Skill 评估时必须同时配置概率评估 Provider。"
+                )
+            middlewares.append(
+                SkillEvaluationMiddleware(
+                    SkillRunEvaluator(
+                        evaluation_provider,
+                        evaluation_config or EvaluationConfig(),
+                        resolved_skill_config,
+                        skill_manager.store,
+                    )
+                )
+            )
     middlewares.extend(
         [
             ContextGovernanceMiddleware(
