@@ -6,7 +6,7 @@
 
 **一个可运行、可恢复、可审计的深度研究智能体，也是一份面向 AI Agent 爱好者的工程学习参考。**
 
-从自然语言问题出发，自动规划研究、搜索并读取网页、整理证据，最终生成带来源的 Markdown 报告。
+从自然语言问题出发，自动规划研究、搜索并读取网页、整理证据，最终生成带来源的 Markdown 报告。既可以通过 CLI 使用，也可以在 Web 工作台中实时观察研究过程。
 
 [![Tests](https://github.com/1612535983/deepreseach-learing/actions/workflows/tests.yml/badge.svg)](https://github.com/1612535983/deepreseach-learing/actions/workflows/tests.yml)
 ![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)
@@ -65,7 +65,7 @@ DeepResearch Agent 是一个基于 LangGraph 构建的深度研究 Agent。
 ```bash
 git clone https://github.com/1612535983/deepreseach-learing.git
 cd deepreseach-learing
-uv sync --extra dev
+uv sync --extra dev --extra web
 ```
 
 先运行完全离线的 Demo，不需要 API Key：
@@ -86,7 +86,7 @@ uv run deepresearch demo
 uv run pytest -q
 ```
 
-当前项目包含 **315 个自动化测试**，覆盖 Agent、Tool、Middleware、Checkpoint、上下文治理、Memory、Skill、报告评估和受控 Skill 演化。
+当前项目包含 **330 个自动化测试**，覆盖 Agent、Tool、Middleware、Checkpoint、上下文治理、Memory、Skill、报告评估、受控 Skill 演化和 Web API。
 
 ### 接入真实模型
 
@@ -120,6 +120,36 @@ uv run deepresearch run "研究 LangChain Agent" \
 ```
 
 可以先查看[示例报告：LangGraph Agent 核心工作机制](reports/jev-shadow-test-005.md)。该报告展示了完整研究正文、参考来源以及 Jev Shadow 模式生成的质量评估附录；真实内容会随研究问题、模型和搜索结果变化。
+
+### 启动 Web 工作台
+
+先安装并构建前端：
+
+```bash
+cd web
+npm ci
+npm run build
+cd ..
+```
+
+然后从项目根目录启动本地服务：
+
+```bash
+uv run deepresearch serve
+```
+
+打开 `http://127.0.0.1:8000` 即可输入问题。API 文档位于 `http://127.0.0.1:8000/docs`。服务默认只监听本机；当前版本没有用户登录与权限隔离，不应直接暴露到公网。
+
+前端开发时可以在另一个终端运行 `cd web && npm run dev`，浏览器访问 `http://127.0.0.1:5173`；Vite 会把 `/api` 请求代理到 8000 端口。
+
+Web 工作流的输入与输出：
+
+| | 内容 |
+|---|---|
+| 输入 | 研究问题，以及可选的强制 Skill |
+| 实时输出 | 计划、搜索、阅读、Reflection、Skill 和 JEV 事件 |
+| 最终输出 | Markdown 报告、来源、JEV 质量结果和上下文诊断 |
+| 恢复输入 | SQLite 中已有的 `thread_id` |
 
 ## 工作流程
 
@@ -163,7 +193,7 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    CLI[CLI / Python API] --> RUNNER[Runner / Stream]
+    ENTRY[CLI / Web / Python API] --> RUNNER[Runner / Stream]
     RUNNER --> GRAPH[LangGraph Agent]
     GRAPH <--> MODEL[Chat Model]
     GRAPH <--> TOOLS[Research Tools]
@@ -182,6 +212,7 @@ flowchart TB
 | 组件 | 输入 | 输出 | 解决的问题 |
 |---|---|---|---|
 | CLI / Runner | 问题、参数、`thread_id` | `ResearchResult`、流式事件、报告文件 | 统一启动、恢复和展示任务 |
+| Web API / UI | HTTP 请求、SSE 事件 | 任务时间线、报告、来源和诊断页面 | 让非命令行用户操作并观察研究任务 |
 | Agent Graph | Messages、State、模型响应 | 下一次模型调用或 Tool 调用 | 组织模型与工具的循环 |
 | Research Tool | 查询词、URL、计划步骤、报告 | 搜索记录、正文、计划更新、最终报告 | 让模型能够对外执行动作 |
 | Middleware | 模型请求、Tool 结果、State | 状态更新、约束、路由决策 | 集中处理证据、反思、预算和上下文 |
@@ -202,12 +233,14 @@ flowchart TB
 │   ├── state.py             # 研究状态与 reducer
 │   ├── checkpointing.py     # SQLite Checkpoint 与任务恢复
 │   ├── events.py            # 流式事件
+│   ├── api/                 # FastAPI、公开 DTO、异步任务与 SSE
 │   ├── tools/               # 搜索、正文读取、计划和报告工具
 │   ├── middlewares/         # 证据、反思、治理、记忆等横切逻辑
 │   ├── context/             # Token、外化、快照、摘要和收尾策略
 │   ├── memory/              # 长期记忆存储、检索与 Worker
 │   ├── skill/               # Skill 解析、版本、选择、注入、指标和受控演化
 │   └── evaluation/          # 报告/Skill 概率评估与 Provider 适配
+├── web/                     # React + TypeScript 研究工作台
 ├── tests/                   # 自动化测试
 ├── examples/                # 输出样例
 ├── reports/                 # 运行报告与 Jev Shadow 示例
@@ -231,6 +264,7 @@ flowchart TB
 | 7. 理解能力复用 | `memory/`、`skill/` | “记住什么”和“应该怎样做”有什么区别？ | 编写一个自己的 `SKILL.md` |
 | 8. 理解质量评估 | `evaluation/` | 概率评估怎样进入系统，又怎样避免失控回跳？ | 使用 Shadow 模式收集结果 |
 | 9. 理解受控演化 | `evaluation/skill.py`、`skill/evolution.py` | 怎样把评估信号变成候选，而不让模型直接改线上 Skill？ | 生成、评审并人工晋级一个候选版本 |
+| 10. 理解产品边界 | `api/`、`web/` | 内部 State 如何变成稳定 API，流式事件如何进入页面？ | 启动工作台并观察一次研究 |
 
 推荐的完整代码阅读顺序：
 
@@ -423,21 +457,22 @@ DEEPRESEARCH_JEV_API_KEY=your-typesafe-api-key
 - **Reflection**：Agent 准备结束时进行的缺口检查；本项目对回跳次数设置了上限。
 - **Token / 上下文窗口**：模型处理文本的计量单位，以及一次请求能够容纳的 Token 上限。
 - **Shadow / Gate**：Shadow 只观测评估结果；Gate 可以根据阈值有限地改变后续路由。
+- **SSE**：服务器向浏览器单向持续推送事件的 HTTP 机制，本项目用它实时展示研究进度。
+- **DTO**：专门用于 API 输入输出的数据结构；它过滤内部消息和大段证据，避免直接暴露完整 State。
 
 ## 当前边界与后续方向
 
-当前项目是一个 **单 Agent、CLI 优先的深度研究内核**，重点是把状态、证据、恢复、上下文和评估链路做清楚。
+当前项目是一个 **单 Agent、本地单用户的深度研究系统**。CLI、Python API 和 Web 工作台共用同一个 Runner、事件与 Checkpoint 边界。
 
 目前尚未实现：
 
-- 完整 Web 应用和对外 API；
 - MCP 与独立 Sandbox；
 - 多 Agent 并行研究；
 - 使用人工标注数据完成概率校准；
 - 固定任务集上的 Skill baseline/candidate A/B 重放与 Canary 发布；
 - 对事实正确率、报告质量和成本进行系统 Benchmark。
 
-后续计划优先补充评估数据集，计算 Brier Score、ECE 和质量/成本指标，再考虑 MCP、Sandbox、API、前端与多 Agent。
+后续计划优先补充评估数据集，计算 Brier Score、ECE 和质量/成本指标，再考虑 MCP、Sandbox、多用户鉴权和多 Agent。
 
 ## 测试与贡献
 

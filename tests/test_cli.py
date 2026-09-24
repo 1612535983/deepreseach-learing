@@ -37,6 +37,19 @@ def test_run_can_show_research_trace(monkeypatch, capsys) -> None:  # noqa: ANN0
     assert "test query" in output
 
 
+def test_serve_starts_local_web_application(monkeypatch) -> None:  # noqa: ANN001
+    received = {}
+
+    def fake_serve(host, port, *, reload):  # noqa: ANN001, ANN202
+        received.update(host=host, port=port, reload=reload)
+        return 0
+
+    monkeypatch.setattr("deepresearch.cli._serve_web", fake_serve)
+
+    assert main(["serve", "--host", "0.0.0.0", "--port", "8080", "--reload"]) == 0
+    assert received == {"host": "0.0.0.0", "port": 8080, "reload": True}
+
+
 def test_run_can_save_final_report(monkeypatch, capsys, tmp_path) -> None:  # noqa: ANN001
     state = create_initial_state("测试问题")
     state["final_report"] = "# 最终研究报告\n\n报告正文"

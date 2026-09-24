@@ -5,9 +5,11 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator, Callable, Sequence
 import json
+from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from deepresearch.api.runs import RunManager
 from deepresearch.api.schemas import (
@@ -21,9 +23,13 @@ from deepresearch.skill.config import SkillConfig
 from deepresearch.skill.types import SkillRecord
 
 
+DEFAULT_WEB_DIST = Path(__file__).resolve().parents[3] / "web" / "dist"
+
+
 def create_app(
     run_manager: RunManager | None = None,
     skill_catalog: Callable[[], Sequence[SkillRecord]] | None = None,
+    static_dir: str | Path | None = None,
 ) -> FastAPI:
     """Create an isolated API application for production and tests."""
 
@@ -168,6 +174,14 @@ def create_app(
                 "Cache-Control": "no-cache",
                 "X-Accel-Buffering": "no",
             },
+        )
+
+    web_root = Path(static_dir) if static_dir is not None else DEFAULT_WEB_DIST
+    if web_root.is_dir() and (web_root / "index.html").is_file():
+        application.mount(
+            "/",
+            StaticFiles(directory=web_root, html=True),
+            name="web",
         )
 
     return application

@@ -110,3 +110,18 @@ def test_skills_endpoint_returns_public_catalog() -> None:
             "completion_rate": 0.0,
         }
     ]
+
+
+def test_built_frontend_can_be_served_by_api(tmp_path) -> None:  # noqa: ANN001
+    (tmp_path / "index.html").write_text(
+        "<html><body>DeepResearch Workbench</body></html>",
+        encoding="utf-8",
+    )
+
+    with TestClient(create_app(static_dir=tmp_path)) as client:
+        response = client.get("/")
+        health = client.get("/api/health")
+
+    assert response.status_code == 200
+    assert "DeepResearch Workbench" in response.text
+    assert health.json() == {"status": "ok"}

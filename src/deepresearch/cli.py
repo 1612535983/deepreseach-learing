@@ -134,6 +134,15 @@ def build_parser() -> argparse.ArgumentParser:
         default="这个最小 Agent 的执行链是否已经跑通？",
     )
 
+    serve = subparsers.add_parser("serve", help="启动 Web API 与已构建的前端页面")
+    serve.add_argument("--host", default="127.0.0.1", help="监听地址")
+    serve.add_argument("--port", type=int, default=8000, help="监听端口")
+    serve.add_argument(
+        "--reload",
+        action="store_true",
+        help="代码变化后自动重启，仅用于本地开发",
+    )
+
     run = subparsers.add_parser("run", help="使用 .env 中的真实模型回答问题")
     run.add_argument("question", help="要交给 Agent 的问题")
     run.add_argument(
@@ -237,6 +246,24 @@ def _cli_skill_config() -> SkillConfig:
     load_dotenv()
     config = SkillConfig.from_env()
     return config if config.enabled else replace(config, use="default")
+
+
+def _serve_web(host: str, port: int, *, reload: bool) -> int:
+    if not 1 <= port <= 65_535:
+        raise ValueError("Web 服务端口必须在 1 到 65535 之间。")
+    try:
+        import uvicorn
+    except ImportError as exc:  # pragma: no cover - depends on install extras
+        raise RuntimeError(
+            "缺少 Web 依赖，请运行：uv sync --extra web"
+        ) from exc
+    uvicorn.run(
+        "deepresearch.api.app:app",
+        host=host,
+        port=port,
+        reload=reload,
+    )
+    return 0
 
 
 def _resolve_skill(manager: SkillManager, identifier: str) -> SkillRecord:
@@ -414,6 +441,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     output_path = None
 
     try:
+        if args.command == "serve":
+            return _serve_web(args.host, args.port, reload=args.reload)
         if args.command == "skills":
             return _manage_skills(args)
         if args.command == "inspect":

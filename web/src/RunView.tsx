@@ -333,7 +333,7 @@ function RunView({ threadId }: { threadId: string }) {
                     <span>{String(index + 1).padStart(2, "0")}</span>
                     <h3>{source.title || source.url}</h3>
                     {source.snippet && <p>{source.snippet}</p>}
-                    <small>{new URL(source.url).hostname}</small>
+                    <small>{sourceHostname(source.url)}</small>
                   </a>
                 ))}
               </div>
@@ -433,6 +433,14 @@ function RunView({ threadId }: { threadId: string }) {
       </div>
     </main>
   );
+}
+
+function sourceHostname(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
 }
 
 function Metric({

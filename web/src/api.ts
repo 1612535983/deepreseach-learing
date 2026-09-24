@@ -181,7 +181,11 @@ export function subscribeToRun(
     `/api/runs/${encodeURIComponent(threadId)}/events`,
   );
   const listener = (message: MessageEvent<string>) => {
-    onEvent(JSON.parse(message.data) as ResearchEvent);
+    try {
+      onEvent(JSON.parse(message.data) as ResearchEvent);
+    } catch {
+      onConnectionError();
+    }
   };
   EVENT_TYPES.forEach((type) => source.addEventListener(type, listener));
   source.onerror = onConnectionError;
