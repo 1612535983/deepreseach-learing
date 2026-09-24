@@ -27,6 +27,10 @@ dependencies = [
 dev = [
     "pytest>=8,<10",
 ]
+web = [
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.34,<1",
+]
 
 [project.scripts]
 deepresearch = "deepresearch.cli:main"

@@ -10,6 +10,8 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+node_modules/
+web/dist/
 .deepresearch/
 reports/*
 !reports/jev-shadow-test-005.md
