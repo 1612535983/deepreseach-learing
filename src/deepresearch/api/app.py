@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable, Sequence
 import json
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request, status
@@ -14,13 +14,21 @@ from deepresearch.api.schemas import (
     CreateRunRequest,
     RunAcceptedResponse,
     RunDetailResponse,
+    SkillResponse,
 )
+from deepresearch.skill.bootstrap import get_skill_manager
+from deepresearch.skill.config import SkillConfig
+from deepresearch.skill.types import SkillRecord
 
 
-def create_app(run_manager: RunManager | None = None) -> FastAPI:
+def create_app(
+    run_manager: RunManager | None = None,
+    skill_catalog: Callable[[], Sequence[SkillRecord]] | None = None,
+) -> FastAPI:
     """Create an isolated API application for production and tests."""
 
     manager = run_manager or RunManager()
+    catalog = skill_catalog or _default_skill_catalog
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -58,12 +66,54 @@ def create_app(run_manager: RunManager | None = None) -> FastAPI:
     )
     async def get_run(thread_id: str, request: Request) -> RunDetailResponse:
         try:
-            detail = _manager(request).detail(thread_id)
+            detail = await _manager(request).detail_or_checkpoint(thread_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if detail is None:
             raise HTTPException(status_code=404, detail="找不到研究任务。")
         return detail
+
+    @application.post(
+        "/api/runs/{thread_id}/resume",
+        response_model=RunAcceptedResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+        tags=["research"],
+    )
+    async def resume_run(
+        thread_id: str,
+        request: Request,
+    ) -> RunAcceptedResponse:
+        try:
+            return await _manager(request).resume(thread_id)
+        except ValueError as exc:
+            message = str(exc)
+            code = 404 if message.startswith("找不到任务") else 400
+            raise HTTPException(status_code=code, detail=message) from exc
+        except RuntimeError as exc:
+            message = str(exc)
+            code = 409 if message.startswith("任务正在运行") else 422
+            raise HTTPException(status_code=code, detail=message) from exc
+
+    @application.get(
+        "/api/skills",
+        response_model=list[SkillResponse],
+        tags=["skills"],
+    )
+    async def list_skills() -> list[SkillResponse]:
+        return [
+            SkillResponse(
+                skill_id=skill.skill_id,
+                name=skill.name,
+                description=skill.description,
+                version=skill.version,
+                origin=skill.lineage.origin,
+                tags=list(skill.tags),
+                allowed_tools=list(skill.allowed_tools),
+                total_selections=skill.total_selections,
+                completion_rate=skill.completion_rate,
+            )
+            for skill in catalog()
+        ]
 
     @application.get(
         "/api/runs/{thread_id}/events",
@@ -125,6 +175,11 @@ def create_app(run_manager: RunManager | None = None) -> FastAPI:
 
 def _manager(request: Request) -> RunManager:
     return request.app.state.run_manager
+
+
+def _default_skill_catalog() -> Sequence[SkillRecord]:
+    manager = get_skill_manager(SkillConfig.from_env())
+    return manager.list_skills() if manager is not None else []
 
 
 app = create_app()

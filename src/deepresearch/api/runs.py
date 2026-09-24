@@ -16,7 +16,13 @@ from deepresearch.api.schemas import (
     RunStatus,
     run_detail_from_state,
 )
-from deepresearch.checkpointing import generate_thread_id, normalize_thread_id
+from deepresearch.agent import stream_resume_question
+from deepresearch.checkpointing import (
+    aget_checkpoint_state,
+    generate_thread_id,
+    normalize_thread_id,
+    open_async_sqlite_checkpointer,
+)
 from deepresearch.events import ResearchEvent
 from deepresearch.state import ResearchState
 
@@ -25,6 +31,8 @@ EventCallback = Callable[[ResearchEvent], Awaitable[None]]
 RunExecutor = Callable[
     [str, EventCallback, str, tuple[str, ...]], Awaitable[ResearchResult]
 ]
+ResumeExecutor = Callable[[EventCallback, str], Awaitable[ResearchResult]]
+CheckpointLoader = Callable[[str], Awaitable[ResearchState]]
 
 
 async def default_run_executor(
@@ -41,6 +49,33 @@ async def default_run_executor(
         thread_id=thread_id,
         skill_overrides=skill_overrides,
     )
+
+
+async def default_resume_executor(
+    on_event: EventCallback,
+    thread_id: str,
+) -> ResearchResult:
+    """Run the existing synchronous resume path without blocking the API loop."""
+
+    loop = asyncio.get_running_loop()
+
+    def forward_event(event: ResearchEvent) -> None:
+        future = asyncio.run_coroutine_threadsafe(on_event(event), loop)
+        future.result()
+
+    return await asyncio.to_thread(
+        stream_resume_question,
+        thread_id,
+        forward_event,
+    )
+
+
+async def default_checkpoint_loader(thread_id: str) -> ResearchState:
+    """Load a persisted task independently of the process-local registry."""
+
+    async with open_async_sqlite_checkpointer() as checkpointer:
+        values = await aget_checkpoint_state(checkpointer, thread_id)
+    return values  # type: ignore[return-value]
 
 
 @dataclass
@@ -76,9 +111,13 @@ class RunManager:
         self,
         executor: RunExecutor = default_run_executor,
         *,
+        resume_executor: ResumeExecutor = default_resume_executor,
+        checkpoint_loader: CheckpointLoader = default_checkpoint_loader,
         thread_id_factory: Callable[[], str] = generate_thread_id,
     ) -> None:
         self._executor = executor
+        self._resume_executor = resume_executor
+        self._checkpoint_loader = checkpoint_loader
         self._thread_id_factory = thread_id_factory
         self._records: dict[str, RunRecord] = {}
         self._lock = asyncio.Lock()
@@ -100,7 +139,53 @@ class RunManager:
             )
         return RunAcceptedResponse(thread_id=thread_id, status=record.status)
 
+    async def resume(self, thread_id: str) -> RunAcceptedResponse:
+        normalized = normalize_thread_id(thread_id)
+        saved_state = await self._checkpoint_loader(normalized)
+        question = saved_state.get("research_question")
+        if not isinstance(question, str) or not question.strip():
+            raise RuntimeError(f"任务 {normalized} 没有保存有效的研究问题。")
+        async with self._lock:
+            existing = self._records.get(normalized)
+            if existing is not None and not existing.terminal:
+                raise RuntimeError(f"任务正在运行：{normalized}")
+            record = RunRecord(
+                thread_id=normalized,
+                question=question.strip(),
+                skill_overrides=(),
+                state=saved_state,
+            )
+            self._records[normalized] = record
+            record.task = asyncio.create_task(
+                self._execute_resume(record),
+                name=f"deepresearch-resume:{normalized}",
+            )
+        return RunAcceptedResponse(thread_id=normalized, status=record.status)
+
     async def _execute(self, record: RunRecord) -> None:
+        async def operation(on_event: EventCallback) -> ResearchResult:
+            return await self._executor(
+                record.question,
+                on_event,
+                record.thread_id,
+                record.skill_overrides,
+            )
+
+        await self._run_operation(record, operation, failure_label="研究运行失败")
+
+    async def _execute_resume(self, record: RunRecord) -> None:
+        async def operation(on_event: EventCallback) -> ResearchResult:
+            return await self._resume_executor(on_event, record.thread_id)
+
+        await self._run_operation(record, operation, failure_label="研究恢复失败")
+
+    async def _run_operation(
+        self,
+        record: RunRecord,
+        operation: Callable[[EventCallback], Awaitable[ResearchResult]],
+        *,
+        failure_label: str,
+    ) -> None:
         record.status = RunStatus.RUNNING
         record.updated_at = datetime.now(UTC)
         await self._notify_changed(record)
@@ -109,12 +194,7 @@ class RunManager:
             await self._append_event(record, event)
 
         try:
-            result = await self._executor(
-                record.question,
-                on_event,
-                record.thread_id,
-                record.skill_overrides,
-            )
+            result = await operation(on_event)
         except asyncio.CancelledError:
             record.status = RunStatus.INTERRUPTED
             record.updated_at = datetime.now(UTC)
@@ -129,7 +209,7 @@ class RunManager:
                     record,
                     ResearchEvent(
                         "run_failed",
-                        f"研究运行失败：{record.error}",
+                        f"{failure_label}：{record.error}",
                         {"error_type": type(exc).__name__},
                     ),
                 )
@@ -180,6 +260,37 @@ class RunManager:
             created_at=record.created_at,
             updated_at=record.updated_at,
             error=record.error,
+        )
+
+    async def detail_or_checkpoint(
+        self,
+        thread_id: str,
+    ) -> RunDetailResponse | None:
+        """Return a live record or reconstruct a read-only persisted snapshot."""
+
+        detail = self.detail(thread_id)
+        if detail is not None:
+            return detail
+        try:
+            state = await self._checkpoint_loader(thread_id)
+        except ValueError:
+            return None
+        question = state.get("research_question")
+        if not isinstance(question, str) or not question.strip():
+            return None
+        now = datetime.now(UTC)
+        inferred_status = (
+            RunStatus.COMPLETED
+            if state.get("final_report")
+            else RunStatus.INTERRUPTED
+        )
+        return run_detail_from_state(
+            thread_id=normalize_thread_id(thread_id),
+            question=question,
+            status=inferred_status,
+            state=state,
+            created_at=now,
+            updated_at=now,
         )
 
     async def event_stream(

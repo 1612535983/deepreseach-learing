@@ -98,6 +98,21 @@ def get_checkpoint_tuple(
     return checkpoint
 
 
+async def aget_checkpoint_tuple(
+    checkpointer: BaseCheckpointSaver,
+    thread_id: str,
+) -> CheckpointTuple:
+    """Asynchronously return the latest checkpoint for one thread."""
+
+    normalized_thread_id = normalize_thread_id(thread_id)
+    checkpoint = await checkpointer.aget_tuple(
+        build_thread_config(normalized_thread_id)
+    )
+    if checkpoint is None:
+        raise ValueError(f"找不到任务：{normalized_thread_id}")
+    return checkpoint
+
+
 def get_checkpoint_state(
     checkpointer: BaseCheckpointSaver,
     thread_id: str,
@@ -105,6 +120,19 @@ def get_checkpoint_state(
     """Read the latest State values saved for one thread."""
 
     checkpoint = get_checkpoint_tuple(checkpointer, thread_id)
+    values = checkpoint.checkpoint.get("channel_values", {})
+    if not isinstance(values, Mapping):
+        raise RuntimeError(f"任务 {thread_id} 的 Checkpoint State 格式无效。")
+    return dict(values)
+
+
+async def aget_checkpoint_state(
+    checkpointer: BaseCheckpointSaver,
+    thread_id: str,
+) -> dict[str, Any]:
+    """Asynchronously read the latest State values for one thread."""
+
+    checkpoint = await aget_checkpoint_tuple(checkpointer, thread_id)
     values = checkpoint.checkpoint.get("channel_values", {})
     if not isinstance(values, Mapping):
         raise RuntimeError(f"任务 {thread_id} 的 Checkpoint State 格式无效。")

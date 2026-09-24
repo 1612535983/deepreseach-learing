@@ -142,6 +142,18 @@ class RunDetailResponse(BaseModel):
     final_report_source_urls: list[str] = Field(default_factory=list)
 
 
+class SkillResponse(BaseModel):
+    skill_id: str
+    name: str
+    description: str
+    version: int
+    origin: str
+    tags: list[str] = Field(default_factory=list)
+    allowed_tools: list[str] = Field(default_factory=list)
+    total_selections: int = 0
+    completion_rate: float = 0.0
+
+
 def run_detail_from_state(
     *,
     thread_id: str,

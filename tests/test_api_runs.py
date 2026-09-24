@@ -95,3 +95,49 @@ def test_event_stream_replays_events_and_finishes_with_run() -> None:
         assert events[0].event_type == "report_created"
 
     asyncio.run(scenario())
+
+
+def test_resume_uses_persisted_question_and_resume_executor() -> None:
+    async def scenario() -> None:
+        saved = create_initial_state("恢复这个问题")
+
+        async def load_checkpoint(thread_id):
+            assert thread_id == "research-resume"
+            return saved
+
+        async def resume_executor(on_event, thread_id):
+            await on_event(ResearchEvent("run_started", "恢复研究"))
+            restored = create_initial_state("恢复这个问题")
+            restored["final_report"] = "# 已恢复"
+            return ResearchResult("恢复这个问题", "# 已恢复", restored, thread_id)
+
+        manager = RunManager(
+            resume_executor=resume_executor,
+            checkpoint_loader=load_checkpoint,
+        )
+        accepted = await manager.resume("research-resume")
+        completed = await manager.wait(accepted.thread_id)
+
+        assert completed.status == RunStatus.COMPLETED
+        assert completed.question == "恢复这个问题"
+        assert completed.final_report == "# 已恢复"
+
+    asyncio.run(scenario())
+
+
+def test_detail_falls_back_to_checkpoint_after_process_restart() -> None:
+    async def scenario() -> None:
+        saved = create_initial_state("持久化问题")
+        saved["final_report"] = "# 持久化报告"
+
+        async def load_checkpoint(thread_id):
+            return saved
+
+        manager = RunManager(checkpoint_loader=load_checkpoint)
+        detail = await manager.detail_or_checkpoint("research-persisted")
+
+        assert detail is not None
+        assert detail.status == RunStatus.COMPLETED
+        assert detail.final_report == "# 持久化报告"
+
+    asyncio.run(scenario())

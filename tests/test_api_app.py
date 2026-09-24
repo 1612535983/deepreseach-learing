@@ -8,6 +8,7 @@ from deepresearch.api.app import create_app
 from deepresearch.api.runs import RunManager
 from deepresearch.events import ResearchEvent
 from deepresearch.state import create_initial_state
+from deepresearch.skill.types import SkillLineage, SkillRecord
 
 
 def test_health_endpoint_reports_ready() -> None:
@@ -77,3 +78,35 @@ def test_sse_endpoint_replays_structured_events() -> None:
     assert "event: run_completed" in response.text
     assert "研究完成" in response.text
     assert "event: run_started" not in response.text
+
+
+def test_skills_endpoint_returns_public_catalog() -> None:
+    skill = SkillRecord(
+        skill_id="skill-1",
+        name="web-research",
+        description="网页研究流程",
+        source_path="builtin",
+        object_path="objects/skill-1.md",
+        content_hash="abc",
+        version=2,
+        tags=("research",),
+        allowed_tools=("web_search",),
+        lineage=SkillLineage(origin="BUILTIN"),
+    )
+    with TestClient(create_app(skill_catalog=lambda: [skill])) as client:
+        response = client.get("/api/skills")
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "skill_id": "skill-1",
+            "name": "web-research",
+            "description": "网页研究流程",
+            "version": 2,
+            "origin": "BUILTIN",
+            "tags": ["research"],
+            "allowed_tools": ["web_search"],
+            "total_selections": 0,
+            "completion_rate": 0.0,
+        }
+    ]
