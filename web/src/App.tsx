@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { createRun, listSkills, Skill } from "./api";
+import RunView from "./RunView";
 
 const EXAMPLE_QUESTIONS = [
   "解释 JEV 如何评估研究报告质量，并说明 Gate 为什么不会无限回跳",
@@ -36,6 +37,22 @@ function App() {
     setError(null);
     try {
       const run = await createRun(question, selectedSkills);
+      const remembered = JSON.parse(
+        localStorage.getItem("deepresearch:runs") ?? "[]",
+      ) as Array<{ threadId: string; question: string; createdAt: string }>;
+      localStorage.setItem(
+        "deepresearch:runs",
+        JSON.stringify(
+          [
+            {
+              threadId: run.thread_id,
+              question: question.trim(),
+              createdAt: new Date().toISOString(),
+            },
+            ...remembered.filter((item) => item.threadId !== run.thread_id),
+          ].slice(0, 8),
+        ),
+      );
       window.location.assign(`/?run=${encodeURIComponent(run.thread_id)}`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "创建任务失败");
@@ -54,15 +71,7 @@ function App() {
   if (activeThread) {
     return (
       <Shell>
-        <main className="placeholder-view">
-          <p className="eyebrow">RESEARCH RUN</p>
-          <h1>研究任务已创建</h1>
-          <p className="thread-code">{activeThread}</p>
-          <p className="muted">实时运行视图正在载入。</p>
-          <a className="text-link" href="/">
-            ← 发起新的研究
-          </a>
-        </main>
+        <RunView threadId={activeThread} />
       </Shell>
     );
   }
