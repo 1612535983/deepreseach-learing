@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -181,6 +181,45 @@ class RunManager:
             updated_at=record.updated_at,
             error=record.error,
         )
+
+    async def event_stream(
+        self,
+        thread_id: str,
+        *,
+        after: int = 0,
+        heartbeat_seconds: float = 15.0,
+    ) -> AsyncIterator[ResearchEventResponse | None]:
+        """Replay stored events, then wait for new ones until the run ends.
+
+        ``None`` is a heartbeat marker. Event IDs make browser reconnects
+        resumable without duplicating the visible timeline.
+        """
+
+        record = self.record(thread_id)
+        if record is None:
+            raise KeyError(thread_id)
+        cursor = max(0, after)
+        while True:
+            timed_out = False
+            async with record.changed:
+                if len(record.events) <= cursor and not record.terminal:
+                    try:
+                        await asyncio.wait_for(
+                            record.changed.wait(),
+                            timeout=heartbeat_seconds,
+                        )
+                    except TimeoutError:
+                        timed_out = True
+                batch = list(record.events[cursor:])
+                terminal = record.terminal
+
+            for event in batch:
+                cursor = event.id
+                yield event
+            if terminal and cursor >= len(record.events):
+                break
+            if timed_out and not batch:
+                yield None
 
     async def wait(self, thread_id: str) -> RunDetailResponse:
         record = self.record(thread_id)

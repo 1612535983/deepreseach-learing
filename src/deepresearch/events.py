@@ -143,11 +143,22 @@ def events_from_update(update: object) -> list[ResearchEvent]:
             steps = plan.get("steps")
             step_count = len(steps) if isinstance(steps, list) else 0
             current_step_id = raw_patch.get("current_step_id")
+            public_steps = [
+                {
+                    "step_id": str(step.get("step_id") or ""),
+                    "title": str(step.get("title") or ""),
+                    "status": str(step.get("status") or "pending"),
+                }
+                for step in (steps if isinstance(steps, list) else [])
+                if isinstance(step, dict)
+            ]
             events.append(
                 ResearchEvent(
                     "plan_updated",
                     f"研究计划已更新，共 {step_count} 个步骤",
                     {
+                        "goal": str(plan.get("goal") or ""),
+                        "steps": public_steps,
                         "step_count": step_count,
                         "current_step_id": current_step_id,
                     },

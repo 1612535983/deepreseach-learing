@@ -65,3 +65,33 @@ def test_run_manager_turns_executor_error_into_failed_task() -> None:
         assert manager.record(accepted.thread_id).events[-1].event_type == "run_failed"
 
     asyncio.run(scenario())
+
+
+def test_event_stream_replays_events_and_finishes_with_run() -> None:
+    async def scenario() -> None:
+        async def executor(question, on_event, thread_id, skill_overrides):
+            await on_event(ResearchEvent("run_started", "开始"))
+            await on_event(ResearchEvent("report_created", "报告完成"))
+            state = create_initial_state(question)
+            state["final_report"] = "# 完成"
+            return ResearchResult(question, "# 完成", state, thread_id)
+
+        manager = RunManager(executor, thread_id_factory=lambda: "research-events")
+        accepted = await manager.start(CreateRunRequest(question="事件流"))
+        await manager.wait(accepted.thread_id)
+
+        events = [
+            event
+            async for event in manager.event_stream(
+                accepted.thread_id,
+                after=1,
+                heartbeat_seconds=0.01,
+            )
+        ]
+
+        assert len(events) == 1
+        assert events[0] is not None
+        assert events[0].id == 2
+        assert events[0].event_type == "report_created"
+
+    asyncio.run(scenario())

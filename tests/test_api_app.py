@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from deepresearch.agent import ResearchResult
 from deepresearch.api.app import create_app
 from deepresearch.api.runs import RunManager
+from deepresearch.events import ResearchEvent
 from deepresearch.state import create_initial_state
 
 
@@ -51,3 +52,28 @@ def test_missing_research_run_returns_404() -> None:
         response = client.get("/api/runs/research-missing")
 
     assert response.status_code == 404
+
+
+def test_sse_endpoint_replays_structured_events() -> None:
+    async def executor(question, on_event, thread_id, skill_overrides):
+        await on_event(ResearchEvent("run_started", "研究开始"))
+        await on_event(ResearchEvent("run_completed", "研究完成"))
+        state = create_initial_state(question)
+        return ResearchResult(question, "完成", state, thread_id)
+
+    manager = RunManager(executor, thread_id_factory=lambda: "research-sse")
+    with TestClient(create_app(manager)) as client:
+        client.post("/api/runs", json={"question": "测试 SSE"})
+        for _ in range(50):
+            if client.get("/api/runs/research-sse").json()["status"] == "completed":
+                break
+            time.sleep(0.01)
+
+        response = client.get("/api/runs/research-sse/events?after=1")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "id: 2" in response.text
+    assert "event: run_completed" in response.text
+    assert "研究完成" in response.text
+    assert "event: run_started" not in response.text
